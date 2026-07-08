@@ -27,4 +27,9 @@
 #
 
 add_subdirectory(jlink)
-add_subdirectory(NordicSemiconductor)
+
+if(NRF_PLATFORM STREQUAL "nrf54l15")
+    add_subdirectory(nrf54)
+else()
+    add_subdirectory(NordicSemiconductor)
+endif()

@@ -31,7 +31,11 @@ add_library(jlinkrtt
     SEGGER_RTT_V640/RTT/SEGGER_RTT.c
 )
 
-if(OT_PLATFORM STREQUAL "nrf52811")
+if(NRF_PLATFORM STREQUAL "nrf54l15")
+    target_compile_options(jlinkrtt PRIVATE
+        -DNRF54L15_XXAA
+    )
+elseif(OT_PLATFORM STREQUAL "nrf52811")
     target_compile_options(jlinkrtt PRIVATE
         -DNRF52811_XXAA
     )
@@ -59,10 +63,21 @@ target_compile_options(jlinkrtt PRIVATE
 
 target_include_directories(jlinkrtt PRIVATE
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/cmsis
-    ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/config
-    ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/config/${NRF_PLATFORM}/config
-    ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/dependencies
-    ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/libraries/app_error
-    ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/nrfx/mdk
 )
+
+if(NRF_PLATFORM STREQUAL "nrf54l15")
+    target_include_directories(jlinkrtt PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/nrf54/sdk/cmsis
+        ${PROJECT_SOURCE_DIR}/third_party/nrf54/config/nrf54l15
+        ${PROJECT_SOURCE_DIR}/third_party/nrf54/sdk/nrfx/mdk
+    )
+else()
+    target_include_directories(jlinkrtt PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/cmsis
+        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/config
+        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/config/${NRF_PLATFORM}/config
+        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/dependencies
+        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/libraries/app_error
+        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/nrfx/mdk
+    )
+endif()

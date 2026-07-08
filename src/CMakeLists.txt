@@ -102,4 +102,15 @@ elseif(NRF_PLATFORM STREQUAL "nrf52840")
         jlinkrtt
     )
     include(nrf52840/nrf52840.cmake)
+elseif(NRF_PLATFORM STREQUAL "nrf54l15")
+    set(NRF_TRANSPORT_SOURCES
+        src/transport/transport.c
+        src/transport/uart.c
+    )
+    set(NRF54L15_3RD_LIBS
+        nordicsemi-nrf54l15-radio-driver
+        nordicsemi-nrf54l15-sdk
+        jlinkrtt
+    )
+    include(nrf54l15/nrf54l15.cmake)
 endif()
