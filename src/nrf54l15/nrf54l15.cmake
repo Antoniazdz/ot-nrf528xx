@@ -33,6 +33,7 @@ set(LD_FILE "${CMAKE_CURRENT_SOURCE_DIR}/nrf54l15/nrf54l15.ld")
 set(COMM_FLAGS
     -DCONFIG_GPIO_AS_PINRESET
     -DNRF54L15_XXAA
+    -DNRF_APPLICATION
     -DUSE_APP_CONFIG=1
     -Wno-unused-parameter
     -Wno-expansion-to-defined
@@ -44,8 +45,14 @@ list(APPEND OT_PLATFORM_DEFINES
 
 list(APPEND OT_PUBLIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/config/nrf54l15"
-    "${PROJECT_SOURCE_DIR}/third_party/nrf54/sdk/nrfx/mdk"
-    "${PROJECT_SOURCE_DIR}/third_party/nrf54/sdk/cmsis"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/mdk"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/templates"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx"
+    # TODO(nrf54): remove when alarm.c uses nrf_802154_platform_sl_lptimer (nRF54 SL API).
+    "${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/drivers/radio/platform/lp_timer"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/driver/src"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/common/include"
 )
 
 set(OT_PLATFORM_DEFINES ${OT_PLATFORM_DEFINES} PARENT_SCOPE)

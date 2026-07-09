@@ -67,9 +67,11 @@ target_include_directories(jlinkrtt PRIVATE
 
 if(NRF_PLATFORM STREQUAL "nrf54l15")
     target_include_directories(jlinkrtt PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/sdk/cmsis
         ${PROJECT_SOURCE_DIR}/third_party/nrf54/config/nrf54l15
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/sdk/nrfx/mdk
+        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/mdk
+        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable
+        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/templates
+        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx
     )
 else()
     target_include_directories(jlinkrtt PRIVATE
