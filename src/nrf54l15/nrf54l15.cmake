@@ -44,6 +44,7 @@ list(APPEND OT_PLATFORM_DEFINES
 )
 
 list(APPEND OT_PUBLIC_INCLUDES
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/cmsis"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/config/nrf54l15"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/mdk"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable"

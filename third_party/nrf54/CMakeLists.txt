@@ -37,11 +37,13 @@ set(NRF54_NRFX_ROOT ${NORDIC_ROOT}/nrfx)
 set(NRF54_MDK_ROOT ${NRF54_NRFX_ROOT}/bsp/stable/mdk)
 set(NRF54_SOC_ROOT ${NRF54_NRFX_ROOT}/bsp/stable/soc)
 set(NRF54_CONFIG_ROOT ${NRF54_ROOT}/config/nrf54l15)
+set(NRF54_CMSIS_ROOT ${NRF54_ROOT}/cmsis)
 set(NRF54_802154_ROOT ${NORDIC_ROOT}/drivers/nrf_802154)
 
 # nrfx 3.x layout (hal_nordic) — different paths than nRF52 sdk/nrfx/
 set(NRF54_SDK_INCLUDES
     ${NRF54_CONFIG_ROOT}
+    ${NRF54_CMSIS_ROOT}
     ${NRF54_NRFX_ROOT}/bsp/stable
     ${NRF54_NRFX_ROOT}/bsp/stable/templates
     ${NRF54_NRFX_ROOT}
