@@ -67,4 +67,70 @@
 #define PLATFORM_FEM_ENABLE_DEFAULT_CONFIG 0
 #endif
 
+/*******************************************************************************
+ * @section OpenThread alarm (GRTC) configuration.
+ ******************************************************************************/
+
+/**
+ * @def OT_GRTC_IRQ_PRIORITY
+ *
+ * Interrupt priority for GRTC (OT ms/us alarms).
+ */
+#ifndef OT_GRTC_IRQ_PRIORITY
+#define OT_GRTC_IRQ_PRIORITY 6
+#endif
+
+/**
+ * @def OT_GRTC_US_PER_TICK
+ *
+ * GRTC SYSCOUNTER tick period in microseconds (1 MHz counter on nRF54L15).
+ */
+#ifndef OT_GRTC_US_PER_TICK
+#define OT_GRTC_US_PER_TICK 1ULL
+#endif
+
+/**
+ * @def OT_GRTC_CC_MS
+ * @def OT_GRTC_CC_US
+ * @def OT_GRTC_CC_RADIO_TIMER
+ * @def OT_GRTC_CC_RADIO_SYNC
+ *
+ * GRTC compare channel budget. Must fit in NRFX_GRTC_CONFIG_ALLOWED_CC_CHANNELS_MASK
+ * (default 0x00000f0f in nrfx_config_nrf54l15_application.h).
+ */
+#ifndef OT_GRTC_CC_MS
+#define OT_GRTC_CC_MS 0
+#endif
+
+#ifndef OT_GRTC_CC_US
+#define OT_GRTC_CC_US 1
+#endif
+
+#ifndef OT_GRTC_CC_RADIO_TIMER
+#define OT_GRTC_CC_RADIO_TIMER 2
+#endif
+
+#ifndef OT_GRTC_CC_RADIO_SYNC
+#define OT_GRTC_CC_RADIO_SYNC 3
+#endif
+
+/**
+ * @def OT_GRTC_CC_RADIO_HW_TASK
+ *
+ * GRTC compare channel for 802.15.4 SL hardware-triggered radio tasks (DPPI).
+ * Must be set in NRFX_GRTC_CONFIG_ALLOWED_CC_CHANNELS_MASK (CC8 is in 0x00000f0f).
+ */
+#ifndef OT_GRTC_CC_RADIO_HW_TASK
+#define OT_GRTC_CC_RADIO_HW_TASK 8
+#endif
+
+/**
+ * @def OT_XTAL_ACCURACY
+ *
+ * Crystal accuracy for otPlatTimeGetXtalAccuracy() [ppm * 2].
+ */
+#ifndef OT_XTAL_ACCURACY
+#define OT_XTAL_ACCURACY 40
+#endif
+
 #endif // PLATFORM_CONFIG_H_
