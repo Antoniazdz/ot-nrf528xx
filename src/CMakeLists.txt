@@ -103,6 +103,8 @@ elseif(NRF_PLATFORM STREQUAL "nrf52840")
     )
     include(nrf52840/nrf52840.cmake)
 elseif(NRF_PLATFORM STREQUAL "nrf54l15")
+    list(REMOVE_ITEM NRF_COMM_SOURCES src/alarm.c)
+    list(APPEND NRF_COMM_SOURCES nrf54l15/alarm_nrf54.c)
     set(NRF_TRANSPORT_SOURCES
         src/transport/transport.c
         src/transport/uart.c
@@ -114,3 +116,4 @@ elseif(NRF_PLATFORM STREQUAL "nrf54l15")
     )
     include(nrf54l15/nrf54l15.cmake)
 endif()
+
