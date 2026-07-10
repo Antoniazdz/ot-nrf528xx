@@ -46,6 +46,7 @@ set(NRF54_SDK_INCLUDES
     ${NRF54_CMSIS_ROOT}
     ${NRF54_NRFX_ROOT}/bsp/stable
     ${NRF54_NRFX_ROOT}/bsp/stable/templates
+    ${NRF54_NRFX_ROOT}/templates
     ${NRF54_NRFX_ROOT}
     ${NRF54_NRFX_ROOT}/hal
     ${NRF54_NRFX_ROOT}/haly
@@ -55,6 +56,7 @@ set(NRF54_SDK_INCLUDES
     ${NRF54_MDK_ROOT}
     ${NRF54_SOC_ROOT}
     ${NRF54_SOC_ROOT}/irqs
+    ${NRF54_SOC_ROOT}/interconnect
 )
 
 set(NRF54_RADIO_INCLUDES
@@ -136,6 +138,14 @@ endforeach()
 # Step 3: SDK lib — minimal nrfx/MDK sources; extend as build reveals gaps.
 set(NRF54_SDK_SOURCES
     ${NRF54_MDK_ROOT}/system_nrf54l.c
+    ${NRF54_NRFX_ROOT}/drivers/src/nrfx_clock_hfclk.c
+    ${NRF54_NRFX_ROOT}/drivers/src/nrfx_clock_lfclk.c
+    ${NRF54_NRFX_ROOT}/drivers/src/nrfx_clock_xo.c
+    ${NRF54_NRFX_ROOT}/drivers/src/nrfx_grtc.c
+    ${NRF54_NRFX_ROOT}/helpers/nrfx_flag32_allocator.c
+    ${NRF54_NRFX_ROOT}/helpers/nrfx_gppi_dppi.c
+    ${NRF54_NRFX_ROOT}/helpers/nrfx_gppi_ppi.c
+    ${NRF54_NRFX_ROOT}/bsp/stable/soc/interconnect/nrfx_gppi_d2ppi.c
 )
 
 add_library(nordicsemi-nrf54l15-sdk)
@@ -153,6 +163,8 @@ target_sources(nordicsemi-nrf54l15-sdk
         ${NRF54_SDK_SOURCES}
 )
 target_link_libraries(nordicsemi-nrf54l15-sdk PRIVATE ot-config)
+
+target_link_libraries(nrf-802154-platform PRIVATE nordicsemi-nrf54l15-sdk)
 
 # Step 4: radio-driver wrapper — links Nordic CMake targets into ot-nrf54xx.
 add_library(nordicsemi-nrf54l15-radio-driver INTERFACE)
