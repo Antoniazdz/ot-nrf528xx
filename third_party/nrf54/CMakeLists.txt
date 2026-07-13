@@ -99,6 +99,15 @@ endif()
 
 add_subdirectory(${NRF54_802154_ROOT} nrf54_nrf_802154_build)
 
+# Bare-metal sl_timer is built in nrf-802154-platform; exclude Zephyr stub from SL.
+if(TARGET nrf-802154-sl)
+    get_target_property(_nrf802154_sl_sources nrf-802154-sl SOURCES)
+    if(_nrf802154_sl_sources)
+        list(FILTER _nrf802154_sl_sources EXCLUDE REGEX "nrf_802154_sl_timer\\.c$")
+        set_target_properties(nrf-802154-sl PROPERTIES SOURCES "${_nrf802154_sl_sources}")
+    endif()
+endif()
+
 # Circular dependency between platform and sl (per Nordic docs).
 target_link_libraries(nrf-802154-platform PRIVATE nrf-802154-sl)
 
