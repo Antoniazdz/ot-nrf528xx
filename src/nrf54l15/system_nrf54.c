@@ -28,7 +28,11 @@
 
 /**
  * @file
- *   This file includes the platform-specific initializers.
+ *   Platform init/deinit for nRF54L15 bare-metal RCP.
+ *
+ *   LFCLK/GRTC: alarm_nrf54.c (nrf_802154_clock + nrfx_grtc).
+ *   HFCLK/XO for radio/UART: third_party/nrf54/platform/nrf_802154_clock_platform.c
+ *   and transport (when ported). No legacy nrf_drv_clock on nRF54.
  *
  */
 
@@ -41,8 +45,6 @@
 #include "platform-fem.h"
 #include "platform-nrf5-transport.h"
 #include "platform-nrf5.h"
-#include <nrf.h>
-#include <nrf_drv_clock.h>
 
 #include <openthread/config.h>
 
@@ -72,31 +74,16 @@ void otSysInit(int argc, char *argv[])
         otSysDeinit();
     }
 
-#if ((!SOFTDEVICE_PRESENT) && (NRF52840_XXAA))
-    // Enable I-code cache
-    NRF_NVMC->ICACHECNF = NVMC_ICACHECNF_CACHEEN_Enabled;
-#elif (DCDC_ENABLE)
-    NRF_POWER->DCDCEN = 1;
-#endif
-
 #if !OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS_MANAGEMENT && PLATFORM_OPENTHREAD_VANILLA
     mbedtls_platform_set_calloc_free(otHeapCAlloc, otHeapFree);
     mbedtls_platform_setup(NULL);
 #endif
-
-    nrf_drv_clock_init();
 
 #if (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_PLATFORM_DEFINED)
     nrf5LogInit();
 #endif
     nrf5AlarmInit();
     nrf5RandomInit();
-    if (!gPlatformPseudoResetWasRequested)
-    {
-#if NRF52840_XXAA
-        nrf5CryptoInit();
-#endif
-    }
     nrf5TransportInit(gPlatformPseudoResetWasRequested);
     nrf5MiscInit();
     nrf5RadioInit();
@@ -113,12 +100,7 @@ void otSysDeinit(void)
     nrf5TempDeinit();
     nrf5RadioDeinit();
     nrf5MiscDeinit();
-    if (!gPlatformPseudoResetWasRequested)
-    {
-#if NRF52840_XXAA
-        nrf5CryptoDeinit();
-#endif
-    }
+    nrf5CryptoDeinit();
     nrf5TransportDeinit(gPlatformPseudoResetWasRequested);
     nrf5RandomDeinit();
     nrf5AlarmDeinit();

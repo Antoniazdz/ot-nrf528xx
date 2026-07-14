@@ -105,6 +105,8 @@ elseif(NRF_PLATFORM STREQUAL "nrf52840")
 elseif(NRF_PLATFORM STREQUAL "nrf54l15")
     list(REMOVE_ITEM NRF_COMM_SOURCES src/alarm.c)
     list(APPEND NRF_COMM_SOURCES nrf54l15/alarm_nrf54.c)
+    list(REMOVE_ITEM NRF_COMM_SOURCES src/crypto.c)
+    list(APPEND NRF_COMM_SOURCES nrf54l15/crypto_nrf54.c)
     list(REMOVE_ITEM NRF_COMM_SOURCES src/entropy.c)
     list(APPEND NRF_COMM_SOURCES nrf54l15/entropy_nrf54.c)
     list(REMOVE_ITEM NRF_COMM_SOURCES src/fem.c)
@@ -115,9 +117,13 @@ elseif(NRF_PLATFORM STREQUAL "nrf54l15")
     list(APPEND NRF_COMM_SOURCES nrf54l15/radio_nrf54.c)
     list(REMOVE_ITEM NRF_COMM_SOURCES src/system.c)
     list(APPEND NRF_COMM_SOURCES nrf54l15/system_nrf54.c)
+    list(REMOVE_ITEM NRF_COMM_SOURCES src/temp.c)
+    list(APPEND NRF_COMM_SOURCES nrf54l15/temp_nrf54.c)
+    list(REMOVE_ITEM NRF_COMM_SOURCES src/flash.c)
+    list(REMOVE_ITEM NRF_SINGLEPHY_SOURCES src/flash_nosd.c)
     set(NRF_TRANSPORT_SOURCES
         src/transport/transport.c
-        src/transport/uart.c
+        nrf54l15/uart_nrf54.c
     )
     set(NRF54L15_3RD_LIBS
         nordicsemi-nrf54l15-radio-driver
