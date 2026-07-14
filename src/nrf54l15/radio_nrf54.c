@@ -57,6 +57,9 @@
 #include "platform-fem.h"
 #include "platform-nrf5.h"
 
+#include <hal/nrf_ficr.h>
+#include <nrfx_glue.h>
+
 #include <nrf.h>
 #include <nrf_802154.h>
 #include <nrf_802154_pib.h>
@@ -70,13 +73,6 @@
 #define SHORT_ADDRESS_SIZE    2            ///< Size of MAC short address.
 #define US_PER_MS             1000ULL      ///< Microseconds in millisecond.
 
-#define ACK_REQUEST_OFFSET       1         ///< Byte containing Ack request bit (+1 for frame length byte).
-#define ACK_REQUEST_BIT          (1 << 5)  ///< Ack request bit.
-#define FRAME_PENDING_OFFSET     1         ///< Byte containing pending bit (+1 for frame length byte).
-#define FRAME_PENDING_BIT        (1 << 4)  ///< Frame Pending bit.
-#define SECURITY_ENABLED_OFFSET  1         ///< Byte containing security enabled bit (+1 for frame length byte).
-#define SECURITY_ENABLED_BIT     (1 << 3)  ///< Security enabled bit.
-
 #define RSSI_SETTLE_TIME_US   40           ///< RSSI settle time in microseconds.
 #define SAFE_DELTA            1000         ///< A safe value for the `dt` parameter of delayed operations.
 
@@ -88,13 +84,15 @@ _Pragma("diag_suppress=Pe167")
 
 enum
 {
-    NRF528XX_RECEIVE_SENSITIVITY  = -100, // dBm
-    NRF528XX_MIN_CCA_ED_THRESHOLD = -94,  // dBm
+    NRF54L15_RECEIVE_SENSITIVITY  = -100, // dBm (POC placeholder; tune for nRF54L15)
+    NRF54L15_MIN_CCA_ED_THRESHOLD = -94,  // dBm (POC placeholder; tune for nRF54L15)
 };
 
 // clang-format on
 
 static bool sDisabled;
+
+static nrf_802154_state_t sDriverState;
 
 static otError      sReceiveError = OT_ERROR_NONE;
 static otRadioFrame sReceivedFrames[NRF_802154_RX_BUFFERS];
@@ -150,6 +148,38 @@ static uint32_t         sAckFrameCounter;
 static uint8_t          sAckKeyId;
 #endif
 
+static inline void SetRadioDriverState(nrf_802154_state_t aState)
+{
+    sDriverState = aState;
+}
+
+static inline bool IsRadioDriverStateSleep(void)
+{
+    return sDriverState == NRF_802154_STATE_SLEEP;
+}
+
+static otRadioState MapRadioDriverStateToOt(nrf_802154_state_t aState)
+{
+    switch (aState)
+    {
+    case NRF_802154_STATE_SLEEP:
+        return OT_RADIO_STATE_SLEEP;
+
+    case NRF_802154_STATE_RECEIVE:
+    case NRF_802154_STATE_ENERGY_DETECTION:
+        return OT_RADIO_STATE_RECEIVE;
+
+    case NRF_802154_STATE_TRANSMIT:
+    case NRF_802154_STATE_CCA:
+    case NRF_802154_STATE_CONTINUOUS_CARRIER:
+        return OT_RADIO_STATE_TRANSMIT;
+
+    default:
+        assert(false);
+        return OT_RADIO_STATE_RECEIVE;
+    }
+}
+
 static int8_t GetTransmitPowerForChannel(uint8_t aChannel)
 {
     int8_t channelMaxPower = nrf5GetChannelMaxTransmitPower(aChannel);
@@ -167,23 +197,16 @@ static int8_t GetTransmitPowerForChannel(uint8_t aChannel)
     return power;
 }
 
-static uint64_t GetRxTimestamp(uint32_t aTime, uint8_t aLength)
+static uint64_t GetRxTimestamp(uint64_t aTime, uint8_t aLength)
 {
-    uint64_t now = nrf5AlarmGetCurrentTime();
+    OT_UNUSED_VARIABLE(aLength);
 
-    // aTime is a wrapping 32-bit integer, meaning it could naturally equal 0
-    // (NRF_802154_NO_TIMESTAMP) even when a valid timestamp exists.  However,
-    // the probability of a genuine timestamp hitting exactly 0 is extremely
-    // low, so falling back to the current timestamp in this rare edge case is
-    // an acceptable risk.
     if (aTime == NRF_802154_NO_TIMESTAMP)
     {
-        aTime = (uint32_t)now;
+        return nrf5AlarmGetCurrentTime();
     }
 
-    aTime = nrf_802154_timestamp_end_to_phr_convert(aTime, aLength);
-
-    return now + (uint64_t)(int32_t)(aTime - (uint32_t)now);
+    return aTime;
 }
 
 static void dataInit(void)
@@ -211,6 +234,8 @@ static void dataInit(void)
     memset(&sAckFrame, 0, sizeof(sAckFrame));
 
     sPrevMacFrameCounter = 0;
+
+    SetRadioDriverState(NRF_802154_STATE_SLEEP);
 }
 
 static void convertShortAddress(uint8_t *aTo, uint16_t aFrom)
@@ -345,8 +370,8 @@ void otPlatRadioGetIeeeEui64(otInstance *aInstance, uint8_t *aIeeeEui64)
     aIeeeEui64[index++] = OPENTHREAD_CONFIG_STACK_VENDOR_OUI & 0xff;
 
     // Use device identifier assigned during the production.
-    factoryAddress = (uint64_t)NRF_FICR->DEVICEID[0] << 32;
-    factoryAddress |= NRF_FICR->DEVICEID[1];
+    factoryAddress = (uint64_t)nrf_ficr_deviceid_get(NRF_FICR, 0) << 32;
+    factoryAddress |= nrf_ficr_deviceid_get(NRF_FICR, 1);
     memcpy(aIeeeEui64 + index, &factoryAddress, sizeof(factoryAddress) - index);
 }
 #endif // OPENTHREAD_CONFIG_ENABLE_PLATFORM_EUI64_CUSTOM_SOURCE
@@ -387,7 +412,7 @@ void nrf5RadioInit(void)
 {
     dataInit();
 #if OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
-    otLinkMetricsInit(NRF528XX_RECEIVE_SENSITIVITY);
+    otLinkMetricsInit(NRF54L15_RECEIVE_SENSITIVITY);
 #endif
     nrf_802154_init();
 }
@@ -397,6 +422,7 @@ void nrf5RadioDeinit(void)
     nrf_802154_sleep();
     nrf_802154_deinit();
     sPendingEvents = 0;
+    SetRadioDriverState(NRF_802154_STATE_SLEEP);
 }
 
 void nrf5RadioClearPendingEvents(void)
@@ -423,25 +449,7 @@ otRadioState otPlatRadioGetState(otInstance *aInstance)
         return OT_RADIO_STATE_DISABLED;
     }
 
-    switch (nrf_802154_state_get())
-    {
-    case NRF_802154_STATE_SLEEP:
-        return OT_RADIO_STATE_SLEEP;
-
-    case NRF_802154_STATE_RECEIVE:
-    case NRF_802154_STATE_ENERGY_DETECTION:
-        return OT_RADIO_STATE_RECEIVE;
-
-    case NRF_802154_STATE_TRANSMIT:
-    case NRF_802154_STATE_CCA:
-    case NRF_802154_STATE_CONTINUOUS_CARRIER:
-        return OT_RADIO_STATE_TRANSMIT;
-
-    default:
-        assert(false); // Make sure driver returned valid state.
-    }
-
-    return OT_RADIO_STATE_RECEIVE; // It is the default state. Return it in case of unknown.
+    return MapRadioDriverStateToOt(sDriverState);
 }
 
 bool otPlatRadioIsEnabled(otInstance *aInstance)
@@ -496,6 +504,7 @@ otError otPlatRadioSleep(otInstance *aInstance)
     {
         nrf5FemDisable();
         clearPendingEvents();
+        SetRadioDriverState(NRF_802154_STATE_SLEEP);
     }
     else
     {
@@ -513,7 +522,7 @@ otError otPlatRadioReceive(otInstance *aInstance, uint8_t aChannel)
     bool result;
 
     nrf_802154_channel_set(aChannel);
-    if (nrf_802154_state_get() == NRF_802154_STATE_SLEEP)
+    if (IsRadioDriverStateSleep())
     {
         // Enable FEM before RADIO leaving SLEEP state.
         nrf5FemEnable();
@@ -522,6 +531,11 @@ otError otPlatRadioReceive(otInstance *aInstance, uint8_t aChannel)
     nrf_802154_tx_power_set(GetTransmitPowerForChannel(aChannel));
     result = nrf_802154_receive();
     clearPendingEvents();
+
+    if (result)
+    {
+        SetRadioDriverState(NRF_802154_STATE_RECEIVE);
+    }
 
     return result ? OT_ERROR_NONE : OT_ERROR_INVALID_STATE;
 }
@@ -543,12 +557,12 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
 
 otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
 {
-    bool    result = true;
-    otError error  = OT_ERROR_NONE;
+    nrf_802154_tx_error_t txError = NRF_802154_TX_ERROR_NONE;
+    otError               error     = OT_ERROR_NONE;
 
     aFrame->mPsdu[-1] = aFrame->mLength;
 
-    if (nrf_802154_state_get() == NRF_802154_STATE_SLEEP)
+    if (IsRadioDriverStateSleep())
     {
         // Enable FEM before RADIO leaving SLEEP state.
         nrf5FemEnable();
@@ -563,32 +577,64 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
 
     if (aFrame->mInfo.mTxInfo.mTxDelay != 0)
     {
-        if (!nrf_802154_transmit_raw_at(&aFrame->mPsdu[-1], true, aFrame->mInfo.mTxInfo.mTxDelayBaseTime,
-                                        aFrame->mInfo.mTxInfo.mTxDelay, aFrame->mChannel))
-        {
-            error = OT_ERROR_INVALID_STATE;
-        }
+#if NRF_802154_DELAYED_TRX_ENABLED
+        nrf_802154_transmit_at_metadata_t atMetadata = {
+            .frame_props         = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT,
+            .cca                 = true,
+            .channel             = aFrame->mChannel,
+            .tx_power            = {.use_metadata_value = false},
+            .extra_cca_attempts  = 0,
+            .tx_timestamp_encode = false,
+        };
+        uint64_t txTime = (uint64_t)aFrame->mInfo.mTxInfo.mTxDelayBaseTime + aFrame->mInfo.mTxInfo.mTxDelay;
+
+        txError = nrf_802154_transmit_raw_at(&aFrame->mPsdu[-1], txTime, &atMetadata);
+#else
+        error = OT_ERROR_NOT_IMPLEMENTED;
+#endif
     }
     else
 #endif
     {
         nrf_802154_channel_set(aFrame->mChannel);
 
+#if NRF_802154_CSMA_CA_ENABLED
         if (aFrame->mInfo.mTxInfo.mCsmaCaEnabled)
         {
-            nrf_802154_max_num_csma_ca_backoffs_set(aFrame->mInfo.mTxInfo.mMaxCsmaBackoffs);
-            nrf_802154_transmit_csma_ca_raw(&aFrame->mPsdu[-1]);
+            nrf_802154_transmit_csma_ca_metadata_t csmaMetadata = {
+                .frame_props         = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT,
+                .tx_power            = {.use_metadata_value = false},
+                .tx_channel          = {.use_metadata_value = true, .channel = aFrame->mChannel},
+                .tx_timestamp_encode = false,
+            };
+
+            (void)nrf_802154_csma_ca_max_backoffs_set(aFrame->mInfo.mTxInfo.mMaxCsmaBackoffs);
+            txError = nrf_802154_transmit_csma_ca_raw(&aFrame->mPsdu[-1], &csmaMetadata);
         }
         else
+#endif
         {
-            result = nrf_802154_transmit_raw(&aFrame->mPsdu[-1], false);
+            nrf_802154_transmit_metadata_t metadata = {
+                .frame_props         = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT,
+                .cca                 = aFrame->mInfo.mTxInfo.mCsmaCaEnabled,
+                .tx_power            = {.use_metadata_value = false},
+                .tx_channel          = {.use_metadata_value = false},
+                .tx_timestamp_encode = false,
+            };
+
+            txError = nrf_802154_transmit_raw(&aFrame->mPsdu[-1], &metadata);
         }
+    }
+
+    if (error == OT_ERROR_NONE && txError == NRF_802154_TX_ERROR_NONE)
+    {
+        SetRadioDriverState(NRF_802154_STATE_TRANSMIT);
     }
 
     clearPendingEvents();
     otPlatRadioTxStarted(aInstance, aFrame);
 
-    if (!result)
+    if (error == OT_ERROR_NONE && txError != NRF_802154_TX_ERROR_NONE)
     {
         setPendingEvent(kPendingEventChannelAccessFailure);
     }
@@ -754,6 +800,7 @@ otError otPlatRadioEnergyScan(otInstance *aInstance, uint8_t aScanChannel, uint1
     if (nrf_802154_energy_detection(sEnergyDetectionTime))
     {
         resetPendingEvent(kPendingEventEnergyDetectionStart);
+        SetRadioDriverState(NRF_802154_STATE_ENERGY_DETECTION);
     }
     else
     {
@@ -810,7 +857,7 @@ otError otPlatRadioGetCcaEnergyDetectThreshold(otInstance *aInstance, int8_t *aT
     {
         nrf_802154_cca_cfg_get(&ccaConfig);
         // The radio driver has no function to convert ED threshold to dBm
-        *aThreshold = (int8_t)ccaConfig.ed_threshold + NRF528XX_MIN_CCA_ED_THRESHOLD - sLnaGain;
+        *aThreshold = (int8_t)ccaConfig.ed_threshold + NRF54L15_MIN_CCA_ED_THRESHOLD - sLnaGain;
     }
 
     return error;
@@ -826,7 +873,7 @@ otError otPlatRadioSetCcaEnergyDetectThreshold(otInstance *aInstance, int8_t aTh
     aThreshold += sLnaGain;
 
     // The minimum value of ED threshold for radio driver is -94 dBm
-    if (aThreshold < NRF528XX_MIN_CCA_ED_THRESHOLD)
+    if (aThreshold < NRF54L15_MIN_CCA_ED_THRESHOLD)
     {
         error = OT_ERROR_INVALID_ARGS;
     }
@@ -940,6 +987,7 @@ void nrf5RadioProcess(otInstance *aInstance)
         {
             nrf5FemDisable();
             resetPendingEvent(kPendingEventSleep);
+            SetRadioDriverState(NRF_802154_STATE_SLEEP);
         }
         else
         {
@@ -954,6 +1002,7 @@ void nrf5RadioProcess(otInstance *aInstance)
         if (nrf_802154_energy_detection(sEnergyDetectionTime))
         {
             resetPendingEvent(kPendingEventEnergyDetectionStart);
+            SetRadioDriverState(NRF_802154_STATE_ENERGY_DETECTION);
         }
         else
         {
@@ -967,9 +1016,11 @@ void nrf5RadioProcess(otInstance *aInstance)
     }
 }
 
-void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lqi, uint32_t time)
+void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lqi, uint64_t time)
 {
     otRadioFrame *receivedFrame = NULL;
+
+    SetRadioDriverState(NRF_802154_STATE_RECEIVE);
 
     for (uint32_t i = 0; i < NRF_802154_RX_BUFFERS; i++)
     {
@@ -1023,8 +1074,9 @@ void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lq
     otSysEventSignalPending();
 }
 
-void nrf_802154_receive_failed(nrf_802154_rx_error_t error)
+void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
 {
+    OT_UNUSED_VARIABLE(id);
     switch (error)
     {
     case NRF_802154_RX_ERROR_INVALID_FRAME:
@@ -1081,16 +1133,13 @@ static uint16_t getCslPhase()
 }
 #endif
 
-void nrf_802154_tx_ack_started(uint8_t *p_data, int8_t power, uint8_t lqi)
+void nrf_802154_tx_ack_started(const uint8_t *p_data)
 {
     otRadioFrame ackFrame;
 #if OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
     uint8_t      linkMetricsDataLen = 0;
     uint8_t      linkMetricsData[OT_ENH_PROBING_IE_DATA_MAX_SIZE];
     otMacAddress macAddress;
-#else
-    OT_UNUSED_VARIABLE(power);
-    OT_UNUSED_VARIABLE(lqi);
 #endif
 
     OT_UNUSED_VARIABLE(ackFrame);
@@ -1112,46 +1161,51 @@ void nrf_802154_tx_ack_started(uint8_t *p_data, int8_t power, uint8_t lqi)
 
 #if OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
     otMacFrameGetDstAddr(&ackFrame, &macAddress);
-    if ((linkMetricsDataLen = otLinkMetricsEnhAckGenData(&macAddress, lqi, power, linkMetricsData)) > 0)
+    // nRF54 driver no longer passes RSSI/LQI in this callout; use placeholders for POC.
+    if ((linkMetricsDataLen = otLinkMetricsEnhAckGenData(&macAddress, 0, 0, linkMetricsData)) > 0)
     {
         otMacFrameSetEnhAckProbingIe(&ackFrame, linkMetricsData, linkMetricsDataLen);
     }
 #endif
 
-    txAckProcessSecurity(p_data);
+    txAckProcessSecurity((uint8_t *)p_data);
 #endif
 }
 
-void nrf_802154_transmitted_timestamp_raw(const uint8_t *aFrame,
-                                          uint8_t       *aAckPsdu,
-                                          int8_t         aPower,
-                                          uint8_t        aLqi,
-                                          uint32_t       ack_time)
+void nrf_802154_transmitted_raw(uint8_t                                   *p_frame,
+                                const nrf_802154_transmit_done_metadata_t *p_metadata)
 {
-    OT_UNUSED_VARIABLE(aFrame); // For ARM gcc
-    assert(aFrame == sTransmitPsdu);
+    uint8_t *ackPsdu = p_metadata->data.transmitted.p_ack;
 
-    if (aAckPsdu == NULL)
+    assert(p_frame == sTransmitPsdu);
+
+    SetRadioDriverState(NRF_802154_STATE_RECEIVE);
+
+    if (ackPsdu == NULL)
     {
         sAckFrame.mPsdu = NULL;
     }
     else
     {
-        sAckFrame.mInfo.mRxInfo.mTimestamp = GetRxTimestamp(ack_time, aAckPsdu[0]);
-        sAckFrame.mPsdu                    = &aAckPsdu[1];
-        sAckFrame.mLength                  = aAckPsdu[0];
-        sAckFrame.mInfo.mRxInfo.mRssi      = aPower;
-        sAckFrame.mInfo.mRxInfo.mLqi       = aLqi;
+        sAckFrame.mInfo.mRxInfo.mTimestamp = GetRxTimestamp(p_metadata->data.transmitted.time, ackPsdu[0]);
+        sAckFrame.mPsdu                    = &ackPsdu[1];
+        sAckFrame.mLength                  = ackPsdu[0];
+        sAckFrame.mInfo.mRxInfo.mRssi      = p_metadata->data.transmitted.power;
+        sAckFrame.mInfo.mRxInfo.mLqi       = p_metadata->data.transmitted.lqi;
         sAckFrame.mChannel                 = nrf_802154_channel_get();
     }
 
     setPendingEvent(kPendingEventFrameTransmitted);
 }
 
-void nrf_802154_transmit_failed(const uint8_t *aFrame, nrf_802154_tx_error_t error)
+void nrf_802154_transmit_failed(uint8_t                                   *p_frame,
+                                nrf_802154_tx_error_t                      error,
+                                const nrf_802154_transmit_done_metadata_t *p_metadata)
 {
-    OT_UNUSED_VARIABLE(aFrame); // For ARM gcc
-    assert(aFrame == sTransmitPsdu);
+    OT_UNUSED_VARIABLE(p_metadata);
+    assert(p_frame == sTransmitPsdu);
+
+    SetRadioDriverState(NRF_802154_STATE_RECEIVE);
 
     switch (error)
     {
@@ -1173,9 +1227,10 @@ void nrf_802154_transmit_failed(const uint8_t *aFrame, nrf_802154_tx_error_t err
     }
 }
 
-void nrf_802154_energy_detected(uint8_t result)
+void nrf_802154_energy_detected(const nrf_802154_energy_detected_t *p_result)
 {
-    sEnergyDetected = nrf_802154_dbm_from_energy_level_calculate(result);
+    sEnergyDetected = p_result->ed_dbm;
+    SetRadioDriverState(NRF_802154_STATE_SLEEP);
 
     setPendingEvent(kPendingEventEnergyDetected);
 }
@@ -1184,7 +1239,7 @@ int8_t otPlatRadioGetReceiveSensitivity(otInstance *aInstance)
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    return NRF528XX_RECEIVE_SENSITIVITY;
+    return NRF54L15_RECEIVE_SENSITIVITY;
 }
 
 #if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
@@ -1276,7 +1331,7 @@ void otPlatRadioSetMacKey(otInstance             *aInstance,
     assert(aKeyType == OT_KEY_TYPE_LITERAL_KEY);
     assert(aPrevKey != NULL && aCurrKey != NULL && aNextKey != NULL);
 
-    CRITICAL_REGION_ENTER();
+    NRFX_CRITICAL_SECTION_ENTER();
 
     sKeyId               = aKeyId;
     sPrevKey             = *aPrevKey;
@@ -1284,32 +1339,32 @@ void otPlatRadioSetMacKey(otInstance             *aInstance,
     sNextKey             = *aNextKey;
     sPrevMacFrameCounter = sMacFrameCounter;
 
-    CRITICAL_REGION_EXIT();
+    NRFX_CRITICAL_SECTION_EXIT();
 }
 
 void otPlatRadioSetMacFrameCounter(otInstance *aInstance, uint32_t aMacFrameCounter)
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    CRITICAL_REGION_ENTER();
+    NRFX_CRITICAL_SECTION_ENTER();
 
     sMacFrameCounter = aMacFrameCounter;
 
-    CRITICAL_REGION_EXIT();
+    NRFX_CRITICAL_SECTION_EXIT();
 }
 
 void otPlatRadioSetMacFrameCounterIfLarger(otInstance *aInstance, uint32_t aMacFrameCounter)
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    CRITICAL_REGION_ENTER();
+    NRFX_CRITICAL_SECTION_ENTER();
 
     if (aMacFrameCounter > sMacFrameCounter)
     {
         sMacFrameCounter = aMacFrameCounter;
     }
 
-    CRITICAL_REGION_EXIT();
+    NRFX_CRITICAL_SECTION_EXIT();
 }
 #endif // OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
 
