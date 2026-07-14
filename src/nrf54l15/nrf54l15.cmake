@@ -28,7 +28,9 @@
 
 # Minimal RCP build: single-phy radio, UART transport, no SoftDevice/bootloader.
 
-set(LD_FILE "${CMAKE_CURRENT_SOURCE_DIR}/nrf54l15/nrf54l15.ld")
+set(NRF54_MDK_LINKER_DIR "${PROJECT_SOURCE_DIR}/third_party/nrf54/mdk")
+set(LD_FILE "${NRF54_MDK_LINKER_DIR}/nrf54l/nrf54l15/nrf54l15_xxaa_application.ld")
+set(LD_COMMON_DIR "${NRF54_MDK_LINKER_DIR}/common")
 
 set(COMM_FLAGS
     -DCONFIG_GPIO_AS_PINRESET
@@ -54,6 +56,7 @@ list(APPEND OT_PUBLIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/drivers/radio/platform/lp_timer"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/driver/src"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/common/include"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/sl/include/platform"
 )
 
 set(OT_PLATFORM_DEFINES ${OT_PLATFORM_DEFINES} PARENT_SCOPE)
@@ -66,8 +69,8 @@ if(OT_CFLAGS MATCHES "-pedantic-errors")
     string(REPLACE "-pedantic-errors" "" OT_CFLAGS "${OT_CFLAGS}")
 endif()
 
-set(OT_UART_BAUDRATE 115200 CACHE STRING "UART Baud rate. It must be a pre-defined
-value in src/nrf54l15/transport-config.h")
+set(OT_UART_BAUDRATE 1000000 CACHE STRING "UART baud rate for nRF54L15 RCP (Spinel).
+Must match a NRF_UARTE_BAUDRATE_* symbol from transport-config.h / nrfx HAL.")
 add_definitions(-DUART_BAUDRATE=NRF_UARTE_BAUDRATE_${OT_UART_BAUDRATE})
 
 add_library(openthread-nrf54l15
@@ -96,6 +99,7 @@ target_link_libraries(openthread-nrf54l15
     PUBLIC
         ${OT_MBEDTLS}
         ${NRF54L15_3RD_LIBS}
+        -L${LD_COMMON_DIR}
         -T${LD_FILE}
         -Wl,--gc-sections
         -Wl,-Map=$<TARGET_PROPERTY:NAME>.map
@@ -106,6 +110,7 @@ target_link_libraries(openthread-nrf54l15
 target_link_libraries(openthread-nrf54l15-transport
     PUBLIC
         ${OT_MBEDTLS}
+        -L${LD_COMMON_DIR}
         -T${LD_FILE}
         -Wl,--gc-sections
         -Wl,-Map=$<TARGET_PROPERTY:NAME>.map
@@ -118,6 +123,7 @@ target_link_libraries(openthread-nrf54l15-sdk
     PUBLIC
         ${OT_MBEDTLS}
         ${NRF54L15_3RD_LIBS}
+        -L${LD_COMMON_DIR}
         -T${LD_FILE}
         -Wl,--gc-sections
         -Wl,-Map=$<TARGET_PROPERTY:NAME>.map

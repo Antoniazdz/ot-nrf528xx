@@ -38,9 +38,8 @@
  *   Alternative on the same DK (console / board_config.h style):
  *   - uart30 / NRF_UARTE30: P0.0 TX, P0.1 RX, P0.2 RTS, P0.3 CTS
  *
- *   Note: nrf54l15.cmake may override UART_BAUDRATE via -DUART_BAUDRATE=...
- *   (OT_UART_BAUDRATE CMake cache, default 115200). For 1M Spinel set
- *   -DOT_UART_BAUDRATE=1000000 when configuring the build.
+ *   Note: nrf54l15.cmake sets -DUART_BAUDRATE=NRF_UARTE_BAUDRATE_${OT_UART_BAUDRATE}
+ *   (OT_UART_BAUDRATE cache default: 1000000). Override at configure time if needed.
  */
 
 #ifndef TRANSPORT_CONFIG_H_
@@ -72,6 +71,10 @@
 
 #ifndef UART_IRQN
 #define UART_IRQN UARTE20_IRQn
+#endif
+
+#ifndef UART_IRQ_HANDLER
+#define UART_IRQ_HANDLER UARTE20_IRQHandler
 #endif
 
 #ifndef UART_IRQ_PRIORITY
