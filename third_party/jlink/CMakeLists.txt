@@ -56,25 +56,23 @@ if(RTT_BUFFER_SIZE)
     )
 endif()
 
-target_compile_options(jlinkrtt PRIVATE
-    -DSEGGER_RTT_CONFIG_H=\"${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/segger_rtt/SEGGER_RTT_Conf.h\"
-    -DUSE_APP_CONFIG=1
-)
+if(NRF_PLATFORM STREQUAL "nrf54l15")
+    # Vanilla SEGGER_RTT_Conf.h from SEGGER_RTT_V640/RTT/ (no Nordic SDK wrapper).
+    target_include_directories(jlinkrtt PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/SEGGER_RTT_V640/RTT
+    )
+else()
+    target_compile_options(jlinkrtt PRIVATE
+        -DSEGGER_RTT_CONFIG_H=\"${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/segger_rtt/SEGGER_RTT_Conf.h\"
+        -DUSE_APP_CONFIG=1
+    )
+endif()
 
 target_include_directories(jlinkrtt PRIVATE
     ${PROJECT_SOURCE_DIR}/include
 )
 
-if(NRF_PLATFORM STREQUAL "nrf54l15")
-    target_include_directories(jlinkrtt PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/cmsis
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/config/nrf54l15
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/mdk
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/templates
-        ${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx
-    )
-else()
+if(NOT NRF_PLATFORM STREQUAL "nrf54l15")
     target_include_directories(jlinkrtt PRIVATE
         ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/cmsis
         ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/config

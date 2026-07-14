@@ -27,6 +27,10 @@ target_include_directories(nrf-802154-platform
 
 set(NRF54_PLATFORM_SOURCES
     nrf_802154_clock_platform.c
+    nrf_802154_clock_callbacks.c
+    nrf_802154_irq_platform.c
+    nrf_802154_temperature_platform.c
+    nrf_802154_delayed_trx_stub.c
     nrf_802154_sl_timer_baremetal.c
 )
 

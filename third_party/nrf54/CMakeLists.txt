@@ -99,6 +99,11 @@ endif()
 
 add_subdirectory(${NRF54_802154_ROOT} nrf54_nrf_802154_build)
 
+# nrf_802154_swi.c omits #include "nrf_802154_peripherals.h" (Nordic upstream gap).
+target_compile_options(nrf-802154-driver PRIVATE
+    -include nrf_802154_peripherals.h
+)
+
 # Bare-metal sl_timer is built in nrf-802154-platform; exclude Zephyr stub from SL.
 if(TARGET nrf-802154-sl)
     get_target_property(_nrf802154_sl_sources nrf-802154-sl SOURCES)
@@ -127,6 +132,7 @@ foreach(_nrf802154_lib
             ${NRF54_SDK_INCLUDES}
             ${PROJECT_SOURCE_DIR}/src/nrf54l15
     )
+    target_link_libraries(${_nrf802154_lib} PRIVATE ot-config)
 endforeach()
 
 foreach(_nrf802154_iface
@@ -142,10 +148,14 @@ foreach(_nrf802154_iface
             ${NRF54_SDK_INCLUDES}
             ${PROJECT_SOURCE_DIR}/src/nrf54l15
     )
+    target_link_libraries(${_nrf802154_iface} INTERFACE ot-config)
 endforeach()
 
 # Step 3: SDK lib — minimal nrfx/MDK sources; extend as build reveals gaps.
+set(NRF54_STARTUP_FILE ${NRF54_ROOT}/mdk/nrf54l/nrf54l15/gcc_startup_nrf54l15_application.S)
+
 set(NRF54_SDK_SOURCES
+    ${NRF54_STARTUP_FILE}
     ${NRF54_MDK_ROOT}/system_nrf54l.c
     ${NRF54_NRFX_ROOT}/drivers/src/nrfx_clock_hfclk.c
     ${NRF54_NRFX_ROOT}/drivers/src/nrfx_clock_lfclk.c
@@ -167,6 +177,8 @@ target_include_directories(nordicsemi-nrf54l15-sdk
         ${NRF54_SDK_INCLUDES}
         ${PROJECT_SOURCE_DIR}/src/nrf54l15
 )
+set_property(SOURCE ${NRF54_STARTUP_FILE} PROPERTY LANGUAGE C)
+
 target_sources(nordicsemi-nrf54l15-sdk
     PRIVATE
         ${NRF54_SDK_SOURCES}
