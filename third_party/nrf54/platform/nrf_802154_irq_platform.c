@@ -14,6 +14,9 @@
 
 #include <nrfx.h>
 
+/* Declared in driver when NRF_802154_INTERNAL_RADIO_IRQ_HANDLING=0 (default on nRF54 SL). */
+void nrf_802154_radio_irq_handler(void);
+
 #define NRF_802154_IRQ_DISPATCH_TABLE_SIZE 8U
 
 typedef struct
@@ -106,4 +109,9 @@ void AAR00_CCM00_IRQHandler(void)
     {
         isr();
     }
+}
+
+void RADIO_0_IRQHandler(void)
+{
+    nrf_802154_radio_irq_handler();
 }

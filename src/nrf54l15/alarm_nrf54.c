@@ -246,7 +246,7 @@ static uint64_t GetCurrentTime(AlarmIndex aIndex)
     return TicksToTime(nrfx_grtc_syscounter_get(), aIndex);
 }
 
-void GRTC_IRQHandler(void)
+void GRTC_0_IRQHandler(void)
 {
     nrfx_grtc_irq_handler();
 }

@@ -100,8 +100,10 @@ endif()
 add_subdirectory(${NRF54_802154_ROOT} nrf54_nrf_802154_build)
 
 # nrf_802154_swi.c omits #include "nrf_802154_peripherals.h" (Nordic upstream gap).
+# Driver uses MAX()/MIN() — force-include shim (NCS/Zephyr provides nordic_common.h globally).
 target_compile_options(nrf-802154-driver PRIVATE
-    -include nrf_802154_peripherals.h
+    "SHELL:-include nrf_802154_peripherals.h"
+    "SHELL:-include nordic_common_shim.h"
 )
 
 # Bare-metal sl_timer is built in nrf-802154-platform; exclude Zephyr stub from SL.
