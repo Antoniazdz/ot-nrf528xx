@@ -63,6 +63,9 @@
 #include <nrf.h>
 #include <nrf_802154.h>
 #include <nrf_802154_pib.h>
+#include "platform/nrf_802154_clock.h"
+
+#include "nrf54_debug_stats.h"
 
 #include <openthread-core-config.h>
 #include <openthread/config.h>
@@ -415,6 +418,7 @@ void nrf5RadioInit(void)
     otLinkMetricsInit(NRF54L15_RECEIVE_SENSITIVITY);
 #endif
     nrf_802154_init();
+    nrf_802154_clock_hfclk_start();
 }
 
 void nrf5RadioDeinit(void)
@@ -614,9 +618,12 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
         else
 #endif
         {
+            /* Match nRF52 radio.c: CCA runs only via the driver CSMA-CA module.
+             * transmit_raw() must not honor mCsmaCaEnabled — OT sets it true for
+             * data/MLE even when CSMA_CA_ENABLED=0, which caused TxErrCca storms. */
             nrf_802154_transmit_metadata_t metadata = {
                 .frame_props         = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT,
-                .cca                 = aFrame->mInfo.mTxInfo.mCsmaCaEnabled,
+                .cca                 = false,
                 .tx_power            = {.use_metadata_value = false},
                 .tx_channel          = {.use_metadata_value = false},
                 .tx_timestamp_encode = false,
@@ -1210,6 +1217,10 @@ void nrf_802154_transmit_failed(uint8_t                                   *p_fra
     switch (error)
     {
     case NRF_802154_TX_ERROR_BUSY_CHANNEL:
+        // #region agent log
+        g_nrf54_debug_stats.tx_fail_busy_channel++;
+        // #endregion
+        /* fall through */
     case NRF_802154_TX_ERROR_TIMESLOT_ENDED:
     case NRF_802154_TX_ERROR_ABORTED:
     case NRF_802154_TX_ERROR_TIMESLOT_DENIED:
