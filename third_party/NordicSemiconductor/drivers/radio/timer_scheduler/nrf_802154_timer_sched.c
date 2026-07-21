@@ -408,7 +408,6 @@ void nrf_802154_timer_sched_add(nrf_802154_timer_t * p_timer, bool round_up)
 
     nrf_802154_log(EVENT_TRACE_EXIT, FUNCTION_TSCH_ADD);
 }
-
 void nrf_802154_timer_sched_remove(nrf_802154_timer_t * p_timer, bool * p_was_running)
 {
     if (timer_remove(p_timer, p_was_running))

@@ -106,11 +106,12 @@ target_compile_options(nrf-802154-driver PRIVATE
     "SHELL:-include nordic_common_shim.h"
 )
 
-# Bare-metal sl_timer is built in nrf-802154-platform; exclude Zephyr stub from SL.
+# Bare-metal sl_timer + rsch live in nrf-802154-platform; exclude Zephyr stubs from SL.
 if(TARGET nrf-802154-sl)
     get_target_property(_nrf802154_sl_sources nrf-802154-sl SOURCES)
     if(_nrf802154_sl_sources)
         list(FILTER _nrf802154_sl_sources EXCLUDE REGEX "nrf_802154_sl_timer\\.c$")
+        list(FILTER _nrf802154_sl_sources EXCLUDE REGEX "nrf_802154_sl_rsch\\.c$")
         set_target_properties(nrf-802154-sl PROPERTIES SOURCES "${_nrf802154_sl_sources}")
     endif()
 endif()
