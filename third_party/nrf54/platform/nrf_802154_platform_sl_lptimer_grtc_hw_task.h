@@ -15,7 +15,8 @@
  *
  * @param cc_channel  GRTC compare channel used for the hardware task event.
  */
-void nrf_802154_platform_sl_lptimer_hw_task_cross_domain_connections_setup(uint32_t cc_channel);
+/** @return 0 on success, negative errno from nrfx GPPI on failure. */
+int nrf_802154_platform_sl_lptimer_hw_task_cross_domain_connections_setup(uint32_t cc_channel);
 
 /** @brief Clears cross-domain hardware connections set up for hardware tasks. */
 void nrf_802154_platform_sl_lptimer_hw_task_cross_domain_connections_clear(void);
