@@ -49,6 +49,11 @@ static rsch_prio_t        m_last_notified_prio;
 static bool               m_hfclk_ready;
 static rsch_dly_ts_slot_t m_dly_ts[RSCH_DLY_TS_POOL_SIZE];
 
+static bool hfclk_is_actually_ready(void)
+{
+    return m_hfclk_ready || nrf_802154_clock_hfclk_is_running();
+}
+
 static rsch_dly_ts_slot_t *slot_find_by_id(rsch_dly_ts_id_t id)
 {
     for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
@@ -157,7 +162,7 @@ static rsch_prio_t required_prio_lvl_get(void)
 static rsch_prio_t approved_prio_lvl_get(void)
 {
     /* HFCLK is the only RSCH precondition on bare-metal; when running it satisfies any op. */
-    return m_hfclk_ready ? RSCH_PRIO_MAX : RSCH_PRIO_IDLE;
+    return hfclk_is_actually_ready() ? RSCH_PRIO_MAX : RSCH_PRIO_IDLE;
 }
 
 static void all_prec_update(void)
@@ -379,10 +384,22 @@ void nrf_802154_rsch_continuous_ended(void)
 
 bool nrf_802154_rsch_timeslot_request(uint32_t length_us, rsch_timeslot_prio_t prio)
 {
+    
     (void)length_us;
     (void)prio;
 
-    NRF_802154_ASSERT(m_hfclk_ready);
+    if (!hfclk_is_actually_ready())
+    {
+        if (m_continuous_prio < RSCH_PRIO_MAX)
+        {
+            m_continuous_prio = RSCH_PRIO_MAX;
+        }
+
+        all_prec_update();
+        notify_core();
+
+        return false;
+    }
 
     return true;
 }
@@ -427,6 +444,8 @@ void nrf_802154_clock_hfclk_ready(void)
     notify_core();
 }
 
+
+
 void nrf_802154_rsch_crit_sect_prio_request(rsch_prio_t prio)
 {
     nrf_802154_rsch_continuous_mode_priority_set(prio);
@@ -458,9 +477,12 @@ bool nrf_802154_rsch_delayed_timeslot_request(const rsch_dly_ts_param_t *p_dly_t
     rsch_dly_ts_slot_t *slot;
     bool                result = false;
 
-    NRF_802154_ASSERT(p_dly_ts_param != NULL);
-    NRF_802154_ASSERT(p_dly_ts_param->started_callback != NULL);
-    NRF_802154_ASSERT(p_dly_ts_param->prio != RSCH_PRIO_IDLE);
+    if ((p_dly_ts_param == NULL) ||
+        (p_dly_ts_param->started_callback == NULL) ||
+        (p_dly_ts_param->prio == RSCH_PRIO_IDLE))
+    {
+        return false;
+    }
 
     slot = slot_alloc(p_dly_ts_param);
     if (slot == NULL)

@@ -95,8 +95,13 @@
  * @def OT_GRTC_CC_RADIO_TIMER
  * @def OT_GRTC_CC_RADIO_SYNC
  *
- * GRTC compare channel budget. Must fit in NRFX_GRTC_CONFIG_ALLOWED_CC_CHANNELS_MASK
- * (default 0x00000f0f in nrfx_config_nrf54l15_application.h).
+ * Logical names for the GRTC compare-channel budget (documentation only).
+ * Runtime channel numbers come from nrfx_grtc_channel_alloc() and must be stored
+ * in module-local variables (see alarm_nrf54.c, nrf_802154_platform_sl_lptimer.c).
+ * Do not assert or compare alloc results against these constants.
+ *
+ * All consumers must fit in NRFX_GRTC_CONFIG_ALLOWED_CC_CHANNELS_MASK
+ * (default 0x00000f0f in nrfx_config_nrf54l15_application.h: CC0–3 and CC8–11).
  */
 #ifndef OT_GRTC_CC_MS
 #define OT_GRTC_CC_MS 0
@@ -117,8 +122,9 @@
 /**
  * @def OT_GRTC_CC_RADIO_HW_TASK
  *
- * GRTC compare channel for 802.15.4 SL hardware-triggered radio tasks (DPPI).
- * Must be set in NRFX_GRTC_CONFIG_ALLOWED_CC_CHANNELS_MASK (CC8 is in 0x00000f0f).
+ * Logical name for the 802.15.4 SL hardware-triggered radio task compare channel
+ * (DPPI). CC8 must be allowed in NRFX_GRTC_CONFIG_ALLOWED_CC_CHANNELS_MASK
+ * (0x00000f0f). The actual channel index is returned by nrfx_grtc_channel_alloc().
  */
 #ifndef OT_GRTC_CC_RADIO_HW_TASK
 #define OT_GRTC_CC_RADIO_HW_TASK 8
