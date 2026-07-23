@@ -48,6 +48,7 @@
 #include <openthread/platform/diag.h>
 #include <openthread/platform/time.h>
 
+#include <haly/nrfy_grtc.h>
 #include <nrfx_grtc.h>
 
 #include "nrf_802154_clock.h"
@@ -77,6 +78,7 @@ typedef struct
 } AlarmData;
 
 static volatile bool sEventPending;
+static bool          sGrtcChannelsReady;
 static AlarmData     sTimerData[kNumTimers];
 static uint8_t       sMsChannel;
 static uint8_t       sUsChannel;
@@ -112,6 +114,7 @@ static inline bool AlarmShallStrike(uint64_t aNow, AlarmIndex aIndex)
 
 static uint64_t GetCurrentTime(AlarmIndex aIndex);
 static void     HandleCompareMatch(AlarmIndex aIndex, bool aSkipCheck);
+static void     AlarmStop(AlarmIndex aIndex);
 
 static inline uint8_t ChannelForIndex(AlarmIndex aIndex)
 {
@@ -133,8 +136,21 @@ static void OtTimerCompareHandler(int32_t aChannel, uint64_t aCounter, void *aCo
 
 static void OtGrtcChannelsInit(void)
 {
-    assert(nrfx_grtc_channel_alloc(&sMsChannel) == 0);
-    assert(nrfx_grtc_channel_alloc(&sUsChannel) == 0);
+    int err;
+
+    if (sGrtcChannelsReady)
+    {
+        return;
+    }
+
+    assert(nrfx_grtc_init_check());
+
+    err = nrfx_grtc_channel_alloc(&sMsChannel);
+    assert(err == 0);
+
+    err = nrfx_grtc_channel_alloc(&sUsChannel);
+    assert(err == 0);
+
     assert(sMsChannel == OT_GRTC_CC_MS);
     assert(sUsChannel == OT_GRTC_CC_US);
 
@@ -145,6 +161,22 @@ static void OtGrtcChannelsInit(void)
     sUsChannelData.channel   = sUsChannel;
     sUsChannelData.handler   = OtTimerCompareHandler;
     sUsChannelData.p_context = (void *)(uintptr_t)kUsTimer;
+
+    sGrtcChannelsReady = true;
+}
+
+static void OtGrtcChannelsDeinit(void)
+{
+    if (!sGrtcChannelsReady)
+    {
+        return;
+    }
+
+    AlarmStop(kMsTimer);
+    AlarmStop(kUsTimer);
+    (void)nrfx_grtc_channel_free(sMsChannel);
+    (void)nrfx_grtc_channel_free(sUsChannel);
+    sGrtcChannelsReady = false;
 }
 
 static uint64_t ConvertT0AndDtTo64BitTime(uint32_t aT0, uint32_t aDt, const uint64_t *aNow)
@@ -209,7 +241,7 @@ static void AlarmStartAt(uint32_t aT0, uint32_t aDt, AlarmIndex aIndex)
 
     TimerStartAt(aT0, aDt, aIndex, &now);
 
-    now_ticks = nrfx_grtc_syscounter_get();
+    now_ticks         = nrfx_grtc_syscounter_get();
     now_rtc_protected = TicksToTime(now_ticks + MIN_LPTICK_COMPARE_EVENT_TICKS, aIndex);
 
     if (AlarmShallStrike(now_rtc_protected, aIndex))
@@ -225,6 +257,7 @@ static void AlarmStartAt(uint32_t aT0, uint32_t aDt, AlarmIndex aIndex)
     }
     else
     {
+        nrfy_grtc_sys_counter_compare_event_enable(NRF_GRTC, ChannelForIndex(aIndex));
         (void)nrfx_grtc_syscounter_cc_int_enable(ChannelForIndex(aIndex));
     }
 }
@@ -265,7 +298,10 @@ void nrf5AlarmInit(void)
 
     if (!nrfx_grtc_init_check())
     {
-        assert(nrfx_grtc_init(OT_GRTC_IRQ_PRIORITY) == 0);
+        int err;
+
+        err = nrfx_grtc_init(OT_GRTC_IRQ_PRIORITY);
+        assert(err == 0);
     }
 
     OtGrtcChannelsInit();
@@ -273,8 +309,7 @@ void nrf5AlarmInit(void)
 
 void nrf5AlarmDeinit(void)
 {
-    AlarmStop(kMsTimer);
-    AlarmStop(kUsTimer);
+    OtGrtcChannelsDeinit();
     sEventPending = false;
 }
 
