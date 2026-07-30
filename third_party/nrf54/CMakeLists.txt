@@ -61,6 +61,7 @@ set(NRF54_SDK_INCLUDES
 
 set(NRF54_RADIO_INCLUDES
     ${NRF54_802154_ROOT}/driver/include
+    ${NRF54_802154_ROOT}/driver/src
     ${NRF54_802154_ROOT}/sl/include
     ${NRF54_802154_ROOT}/common/include
     ${PROJECT_SOURCE_DIR}/openthread/include
