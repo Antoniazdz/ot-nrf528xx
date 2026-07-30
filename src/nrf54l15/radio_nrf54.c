@@ -63,6 +63,7 @@
 #include <nrf.h>
 #include <nrf_802154.h>
 #include <nrf_802154_pib.h>
+#include "nrf_802154_core.h"
 #include "platform/nrf_802154_clock.h"
 
 #include "nrf54_debug_stats.h"
@@ -87,8 +88,8 @@ _Pragma("diag_suppress=Pe167")
 
 enum
 {
-    NRF54L15_RECEIVE_SENSITIVITY  = -100, // dBm (POC placeholder; tune for nRF54L15)
-    NRF54L15_MIN_CCA_ED_THRESHOLD = -94,  // dBm (POC placeholder; tune for nRF54L15)
+    NRF54L15_RECEIVE_SENSITIVITY  = -102, // dBm (POC placeholder; tune for nRF54L15)
+    NRF54L15_MIN_CCA_ED_THRESHOLD = -92,  // dBm (POC placeholder; tune for nRF54L15)
 };
 
 // clang-format on
@@ -301,6 +302,116 @@ static inline void clearPendingEvents(void)
         pendingEvents = __LDREXW((uint32_t *)&sPendingEvents);
         pendingEvents &= bitsToRemain;
     } while (__STREXW(pendingEvents, (uint32_t *)&sPendingEvents));
+}
+
+#define NRF54_DEBUG_PING_TX_LEN_MIN 60U
+#define NRF54_DEBUG_PING_TX_LEN_MAX 120U
+
+static bool nrf54DebugFrameAckRequested(const otRadioFrame *aFrame)
+{
+    uint16_t frameControl;
+
+    if (aFrame->mLength < 2)
+    {
+        return false;
+    }
+
+    frameControl = (uint16_t)aFrame->mPsdu[0] | ((uint16_t)aFrame->mPsdu[1] << 8);
+
+    return (frameControl & 0x0020U) != 0U;
+}
+
+static bool nrf54DebugIsPingSizedTx(const otRadioFrame *aFrame)
+{
+    uint16_t frameControl;
+
+    if (aFrame->mLength < 2)
+    {
+        return false;
+    }
+
+    frameControl = (uint16_t)aFrame->mPsdu[0] | ((uint16_t)aFrame->mPsdu[1] << 8);
+
+    /* 802.15.4 data frame, ACK req, typical ICMP-over-Thread length (excludes short MLE/broadcast). */
+    return ((frameControl & 0x0007U) == 0x0001U) && ((frameControl & 0x0020U) != 0U) &&
+           aFrame->mLength >= NRF54_DEBUG_PING_TX_LEN_MIN && aFrame->mLength <= NRF54_DEBUG_PING_TX_LEN_MAX;
+}
+
+static void nrf54DebugRecordTxImmediateFail(radio_state_t         aDriverStateBefore,
+                                            nrf_802154_tx_error_t aTxError,
+                                            const otRadioFrame   *aFrame)
+{
+    g_nrf54_debug_stats.last_fail_driver_state    = (uint32_t)aDriverStateBefore;
+    g_nrf54_debug_stats.last_fail_immediate_error = aTxError;
+    g_nrf54_debug_stats.last_fail_tx_length       = aFrame->mLength;
+    g_nrf54_debug_stats.last_fail_tx_channel      = aFrame->mChannel;
+    g_nrf54_debug_stats.last_fail_ack_requested   = nrf54DebugFrameAckRequested(aFrame) ? 1U : 0U;
+
+    switch (aDriverStateBefore)
+    {
+    case RADIO_STATE_SLEEP:
+        g_nrf54_debug_stats.tx_fail_state_sleep++;
+        break;
+
+    case RADIO_STATE_RX:
+        g_nrf54_debug_stats.tx_fail_state_rx++;
+        break;
+
+    case RADIO_STATE_TX_ACK:
+        g_nrf54_debug_stats.tx_fail_state_tx_ack++;
+        break;
+
+    case RADIO_STATE_CCA_TX:
+        g_nrf54_debug_stats.tx_fail_state_cca_tx++;
+        break;
+
+    case RADIO_STATE_TX:
+        g_nrf54_debug_stats.tx_fail_state_tx++;
+        break;
+
+    case RADIO_STATE_RX_ACK:
+        g_nrf54_debug_stats.tx_fail_state_rx_ack++;
+        break;
+
+    default:
+        g_nrf54_debug_stats.tx_fail_state_other++;
+        break;
+    }
+
+    switch (aTxError)
+    {
+    case NRF_802154_TX_ERROR_TIMESLOT_DENIED:
+        g_nrf54_debug_stats.tx_raw_err_timeslot_denied++;
+        break;
+
+    case NRF_802154_TX_ERROR_INVALID_REQUEST:
+        g_nrf54_debug_stats.tx_raw_err_invalid_request++;
+        break;
+
+    case NRF_802154_TX_ERROR_KEY_ID_INVALID:
+        g_nrf54_debug_stats.tx_raw_err_key_id_invalid++;
+        break;
+
+    case NRF_802154_TX_ERROR_FRAME_COUNTER_ERROR:
+        g_nrf54_debug_stats.tx_raw_err_frame_counter_error++;
+        break;
+
+    case NRF_802154_TX_ERROR_TIMESTAMP_ENCODING_ERROR:
+        g_nrf54_debug_stats.tx_raw_err_timestamp_encoding++;
+        break;
+
+    default:
+        g_nrf54_debug_stats.tx_raw_err_other++;
+        break;
+    }
+
+    if (nrf54DebugIsPingSizedTx(aFrame))
+    {
+        g_nrf54_debug_stats.tx_fail_ping_sized++;
+        g_nrf54_debug_stats.last_ping_fail_driver_state    = (uint32_t)aDriverStateBefore;
+        g_nrf54_debug_stats.last_ping_fail_immediate_error = aTxError;
+        g_nrf54_debug_stats.last_ping_fail_tx_length       = aFrame->mLength;
+    }
 }
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
@@ -559,10 +670,75 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
 }
 #endif
 
+#if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
+static void nrf54ProcessTransmitSecurity(otRadioFrame *aFrame)
+{
+    bool processSecurity = false;
+
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+    if ((sCslPeriod > 0) && !aFrame->mInfo.mTxInfo.mIsARetx)
+    {
+        otMacFrameSetCslIe(aFrame, (uint16_t)sCslPeriod, getCslPhase());
+    }
+#endif
+
+#if OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
+    if (aFrame->mInfo.mTxInfo.mIeInfo->mTimeIeOffset != 0)
+    {
+        uint8_t *timeIe = aFrame->mPsdu + aFrame->mInfo.mTxInfo.mIeInfo->mTimeIeOffset;
+        uint64_t time   = otPlatTimeGet() + aFrame->mInfo.mTxInfo.mIeInfo->mNetworkTimeOffset;
+
+        *timeIe = aFrame->mInfo.mTxInfo.mIeInfo->mTimeSyncSeq;
+
+        *(++timeIe) = (uint8_t)(time & 0xff);
+        for (uint8_t i = 1; i < sizeof(uint64_t); i++)
+        {
+            time        = time >> 8;
+            *(++timeIe) = (uint8_t)(time & 0xff);
+        }
+
+        processSecurity = true;
+    }
+#endif // OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+    otEXPECT(otMacFrameIsSecurityEnabled(aFrame) && otMacFrameIsKeyIdMode1(aFrame) &&
+             !aFrame->mInfo.mTxInfo.mIsSecurityProcessed);
+
+    aFrame->mInfo.mTxInfo.mAesKey = &sCurrKey;
+    processSecurity               = true;
+#endif // OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+
+    otEXPECT(processSecurity);
+    g_nrf54_debug_stats.tx_late_encrypt++;
+    g_nrf54_debug_stats.last_tx_late_encrypted = 1U;
+
+    if (nrf54DebugIsPingSizedTx(aFrame))
+    {
+        g_nrf54_debug_stats.tx_late_encrypt_ping++;
+    }
+
+    otMacFrameProcessTransmitAesCcm(aFrame, &sExtAddress);
+
+exit:
+    return;
+}
+#endif // OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
+
 otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
 {
     nrf_802154_tx_error_t txError = NRF_802154_TX_ERROR_NONE;
-    otError               error     = OT_ERROR_NONE;
+    otError               error   = OT_ERROR_NONE;
+
+    g_nrf54_debug_stats.tx_enter++;
+    g_nrf54_debug_stats.last_tx_length          = aFrame->mLength;
+    g_nrf54_debug_stats.last_tx_channel         = aFrame->mChannel;
+    g_nrf54_debug_stats.last_tx_csma            = aFrame->mInfo.mTxInfo.mCsmaCaEnabled;
+    g_nrf54_debug_stats.last_tx_max_backoffs    = aFrame->mInfo.mTxInfo.mMaxCsmaBackoffs;
+    g_nrf54_debug_stats.last_tx_immediate_error = NRF_802154_TX_ERROR_NONE;
+    g_nrf54_debug_stats.last_ack_present        = 0;
+    g_nrf54_debug_stats.last_tx_counter_injected = 0U;
+    g_nrf54_debug_stats.last_tx_late_encrypted   = 0U;
 
     aFrame->mPsdu[-1] = aFrame->mLength;
 
@@ -577,7 +753,14 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
     {
         otMacFrameSetKeyId(aFrame, sKeyId);
         otMacFrameSetFrameCounter(aFrame, sMacFrameCounter++);
+        g_nrf54_debug_stats.tx_counter_inject++;
+        g_nrf54_debug_stats.last_tx_counter_injected = 1U;
     }
+
+#if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
+    /* nRF54 driver never calls nrf_802154_tx_started(); encrypt before driver TX (nRF52 model). */
+    nrf54ProcessTransmitSecurity(aFrame);
+#endif
 
     if (aFrame->mInfo.mTxInfo.mTxDelay != 0)
     {
@@ -613,7 +796,20 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
             };
 
             (void)nrf_802154_csma_ca_max_backoffs_set(aFrame->mInfo.mTxInfo.mMaxCsmaBackoffs);
-            txError = nrf_802154_transmit_csma_ca_raw(&aFrame->mPsdu[-1], &csmaMetadata);
+            g_nrf54_debug_stats.tx_csma_enter++;
+            {
+                radio_state_t driverStateBefore = nrf_802154_core_state_get();
+
+                g_nrf54_debug_stats.last_driver_state = driverStateBefore;
+                txError                               = nrf_802154_transmit_csma_ca_raw(&aFrame->mPsdu[-1], &csmaMetadata);
+                g_nrf54_debug_stats.last_tx_immediate_error = txError;
+
+                if (txError != NRF_802154_TX_ERROR_NONE)
+                {
+                    g_nrf54_debug_stats.tx_csma_immediate_error++;
+                    nrf54DebugRecordTxImmediateFail(driverStateBefore, txError, aFrame);
+                }
+            }
         }
         else
 #endif
@@ -629,7 +825,20 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
                 .tx_timestamp_encode = false,
             };
 
-            txError = nrf_802154_transmit_raw(&aFrame->mPsdu[-1], &metadata);
+            g_nrf54_debug_stats.tx_raw_enter++;
+            {
+                radio_state_t driverStateBefore = nrf_802154_core_state_get();
+
+                g_nrf54_debug_stats.last_driver_state = driverStateBefore;
+                txError                               = nrf_802154_transmit_raw(&aFrame->mPsdu[-1], &metadata);
+                g_nrf54_debug_stats.last_tx_immediate_error = txError;
+
+                if (txError != NRF_802154_TX_ERROR_NONE)
+                {
+                    g_nrf54_debug_stats.tx_raw_immediate_error++;
+                    nrf54DebugRecordTxImmediateFail(driverStateBefore, txError, aFrame);
+                }
+            }
         }
     }
 
@@ -954,6 +1163,7 @@ void nrf5RadioProcess(otInstance *aInstance)
         resetPendingEvent(kPendingEventFrameTransmitted);
 
         otRadioFrame *ackPtr = (sAckFrame.mPsdu == NULL) ? NULL : &sAckFrame;
+        g_nrf54_debug_stats.tx_done_success++;
         otPlatRadioTxDone(aInstance, &sTransmitFrame, ackPtr, OT_ERROR_NONE);
 
         if (sAckFrame.mPsdu != NULL)
@@ -966,12 +1176,14 @@ void nrf5RadioProcess(otInstance *aInstance)
     if (isPendingEventSet(kPendingEventChannelAccessFailure))
     {
         resetPendingEvent(kPendingEventChannelAccessFailure);
+        g_nrf54_debug_stats.tx_done_busy++;
         otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_CHANNEL_ACCESS_FAILURE);
     }
 
     if (isPendingEventSet(kPendingEventInvalidOrNoAck))
     {
         resetPendingEvent(kPendingEventInvalidOrNoAck);
+        g_nrf54_debug_stats.tx_done_no_ack++;
         otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_NO_ACK);
     }
 
@@ -1027,6 +1239,7 @@ void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lq
 {
     otRadioFrame *receivedFrame = NULL;
 
+    g_nrf54_debug_stats.rx_frame++;
     SetRadioDriverState(NRF_802154_STATE_RECEIVE);
 
     for (uint32_t i = 0; i < NRF_802154_RX_BUFFERS; i++)
@@ -1190,10 +1403,14 @@ void nrf_802154_transmitted_raw(uint8_t                                   *p_fra
 
     if (ackPsdu == NULL)
     {
+        g_nrf54_debug_stats.tx_driver_success_no_ack++;
+        g_nrf54_debug_stats.last_ack_present = 0;
         sAckFrame.mPsdu = NULL;
     }
     else
     {
+        g_nrf54_debug_stats.tx_driver_success_ack++;
+        g_nrf54_debug_stats.last_ack_present = 1;
         sAckFrame.mInfo.mRxInfo.mTimestamp = GetRxTimestamp(p_metadata->data.transmitted.time, ackPsdu[0]);
         sAckFrame.mPsdu                    = &ackPsdu[1];
         sAckFrame.mLength                  = ackPsdu[0];
@@ -1213,6 +1430,28 @@ void nrf_802154_transmit_failed(uint8_t                                   *p_fra
     assert(p_frame == sTransmitPsdu);
 
     SetRadioDriverState(NRF_802154_STATE_RECEIVE);
+    g_nrf54_debug_stats.last_driver_error = error;
+
+    if (error == NRF_802154_TX_ERROR_BUSY_CHANNEL)
+    {
+        g_nrf54_debug_stats.tx_driver_busy++;
+    }
+    else if (error == NRF_802154_TX_ERROR_NO_ACK)
+    {
+        g_nrf54_debug_stats.tx_driver_no_ack++;
+    }
+    else if (error == NRF_802154_TX_ERROR_TIMESLOT_ENDED)
+    {
+        g_nrf54_debug_stats.tx_driver_timeslot_ended++;
+    }
+    else if (error == NRF_802154_TX_ERROR_ABORTED)
+    {
+        g_nrf54_debug_stats.tx_driver_aborted++;
+    }
+    else if (error == NRF_802154_TX_ERROR_TIMESLOT_DENIED)
+    {
+        g_nrf54_debug_stats.tx_driver_timeslot_denied++;
+    }
 
     switch (error)
     {
@@ -1256,52 +1495,11 @@ int8_t otPlatRadioGetReceiveSensitivity(otInstance *aInstance)
 #if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
 void nrf_802154_tx_started(const uint8_t *aFrame)
 {
-    bool processSecurity = false;
-
     assert(aFrame == sTransmitPsdu);
     OT_UNUSED_VARIABLE(aFrame);
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-    if ((sCslPeriod > 0) && !sTransmitFrame.mInfo.mTxInfo.mIsARetx)
-    {
-        otMacFrameSetCslIe(&sTransmitFrame, (uint16_t)sCslPeriod, getCslPhase());
-    }
-#endif
-
-    // Update IE and secure transmit frame
-#if OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
-    if (sTransmitFrame.mInfo.mTxInfo.mIeInfo->mTimeIeOffset != 0)
-    {
-        uint8_t *timeIe = sTransmitFrame.mPsdu + sTransmitFrame.mInfo.mTxInfo.mIeInfo->mTimeIeOffset;
-        uint64_t time   = otPlatTimeGet() + sTransmitFrame.mInfo.mTxInfo.mIeInfo->mNetworkTimeOffset;
-
-        *timeIe = sTransmitFrame.mInfo.mTxInfo.mIeInfo->mTimeSyncSeq;
-
-        *(++timeIe) = (uint8_t)(time & 0xff);
-        for (uint8_t i = 1; i < sizeof(uint64_t); i++)
-        {
-            time        = time >> 8;
-            *(++timeIe) = (uint8_t)(time & 0xff);
-        }
-
-        processSecurity = true;
-    }
-#endif // OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
-
-#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-    otEXPECT(otMacFrameIsSecurityEnabled(&sTransmitFrame) && otMacFrameIsKeyIdMode1(&sTransmitFrame) &&
-             !sTransmitFrame.mInfo.mTxInfo.mIsSecurityProcessed);
-
-    sTransmitFrame.mInfo.mTxInfo.mAesKey = &sCurrKey;
-
-    processSecurity = true;
-#endif // OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-
-    otEXPECT(processSecurity);
-    otMacFrameProcessTransmitAesCcm(&sTransmitFrame, &sExtAddress);
-
-exit:
-    return;
+    g_nrf54_debug_stats.tx_late_encrypt_hook_enter++;
+    nrf54ProcessTransmitSecurity(&sTransmitFrame);
 }
 #endif
 
