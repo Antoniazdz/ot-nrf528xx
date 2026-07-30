@@ -28,10 +28,13 @@
 
 /**
  * @file
- *   POC crypto stub for nRF54L15 bare-metal RCP.
+ *   nRF54L15 crypto platform glue for bare-metal RCP.
  *
- *   nRF52 hardware ECB (nrf_ecb_*) is unavailable on nRF54. Thread crypto uses
- *   mbedTLS; replace with CRACEN or software AES when platform AES is needed.
+ *   nRF52 uses hardware ECB (nrf_ecb_*). nRF54 has no nrf_ecb, so AES-ECM/CCM
+ *   for otMacFrameProcessTransmitAesCcm() comes from the weak mbedTLS platform
+ *   APIs in crypto_platform_mbedtls.cpp (linked via libopenthread-radio).
+ *
+ *   Do not provide otPlatCryptoAes* here — that would override the mbedTLS impl.
  */
 
 #include <openthread/platform/crypto.h>
@@ -43,40 +46,9 @@
 
 void nrf5CryptoInit(void)
 {
-    // Intentionally empty — keeps platform crypto symbols linked for ot-rcp.
+    // Force-link this translation unit; AES comes from weak otPlatCryptoAes* in OpenThread.
 }
 
 void nrf5CryptoDeinit(void)
 {
-}
-
-otError otPlatCryptoAesInit(otCryptoContext *aContext)
-{
-    OT_UNUSED_VARIABLE(aContext);
-
-    return OT_ERROR_NONE;
-}
-
-otError otPlatCryptoAesSetKey(otCryptoContext *aContext, const otCryptoKey *aKey)
-{
-    OT_UNUSED_VARIABLE(aContext);
-    OT_UNUSED_VARIABLE(aKey);
-
-    return OT_ERROR_NONE;
-}
-
-otError otPlatCryptoAesEncrypt(otCryptoContext *aContext, const uint8_t *aInput, uint8_t *aOutput)
-{
-    OT_UNUSED_VARIABLE(aContext);
-    OT_UNUSED_VARIABLE(aInput);
-    OT_UNUSED_VARIABLE(aOutput);
-
-    return OT_ERROR_NOT_IMPLEMENTED;
-}
-
-otError otPlatCryptoAesFree(otCryptoContext *aContext)
-{
-    OT_UNUSED_VARIABLE(aContext);
-
-    return OT_ERROR_NONE;
 }
