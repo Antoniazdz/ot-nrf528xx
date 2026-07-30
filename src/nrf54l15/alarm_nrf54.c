@@ -55,6 +55,7 @@
  #include "platform-config.h"
  #include "platform-nrf5.h"
  
+ #include "nrf54_debug_stats.h"
  // clang-format off
  #define US_PER_MS                       1000ULL
  
@@ -77,7 +78,9 @@
  } AlarmData;
  
  static volatile bool sEventPending;
+ static bool          sSyscounterStarted;
  static AlarmData     sTimerData[kNumTimers];
+ static uint8_t       sMainCcChannel;
  static uint8_t       sMsChannel;
  static uint8_t       sUsChannel;
  static nrfx_grtc_channel_t sMsChannelData;
@@ -131,11 +134,29 @@
      HandleCompareMatch((AlarmIndex)(uintptr_t)aContext, false);
  }
  
+ static void GrtcSyscounterEnsureStarted(void)
+ {
+     int err;
+ 
+     if (sSyscounterStarted)
+     {
+         return;
+     }
+ 
+     assert(nrfx_grtc_init_check());
+ 
+     err = nrfx_grtc_syscounter_start(true, &sMainCcChannel);
+     assert(err == 0);
+ 
+     sSyscounterStarted = true;
+ }
+ 
  static void OtGrtcChannelsInit(void)
  {
     int err;
 
-    
+    assert(nrfx_grtc_init_check());
+
     err = nrfx_grtc_channel_alloc(&sMsChannel);
     assert(err == 0);
 
@@ -244,7 +265,7 @@
  
  static uint64_t GetCurrentTime(AlarmIndex aIndex)
  {
-     if (!nrfx_grtc_init_check())
+     if (!nrfx_grtc_init_check() || !nrfx_grtc_ready_check())
      {
          return 0;
      }
@@ -252,11 +273,23 @@
      return TicksToTime(nrfx_grtc_syscounter_get(), aIndex);
  }
  
+ void GRTC_2_IRQHandler(void)
+ {  g_nrf54_debug_stats.grtc2_isr_enter++;
+     nrfx_grtc_irq_handler();
+ }
  void GRTC_0_IRQHandler(void)
  {
      nrfx_grtc_irq_handler();
  }
- 
+ void GRTC_1_IRQHandler(void)
+ {
+     nrfx_grtc_irq_handler();
+ }
+ void GRTC_3_IRQHandler(void)
+ {
+     nrfx_grtc_irq_handler();
+ }
+
  void nrf5AlarmInit(void)
  {
      memset(sTimerData, 0, sizeof(sTimerData));
@@ -273,11 +306,12 @@
      {
         int err;
 
-       err = nrfx_grtc_init(OT_GRTC_IRQ_PRIORITY);
+        err = nrfx_grtc_init(OT_GRTC_IRQ_PRIORITY);
         assert(err == 0);
 
      }
- 
+
+     GrtcSyscounterEnsureStarted();
      OtGrtcChannelsInit();
  }
  
@@ -327,7 +361,7 @@
  
  uint64_t nrf5AlarmGetRawCounter(void)
  {
-     if (!nrfx_grtc_init_check())
+     if (!nrfx_grtc_init_check() || !nrfx_grtc_ready_check())
      {
          return 0;
      }

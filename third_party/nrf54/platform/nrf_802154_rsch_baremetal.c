@@ -26,6 +26,11 @@
 #include "platform/nrf_802154_clock.h"
 #include "nrf54_debug_stats.h"
 
+#include "rsch/nrf_802154_rsch_crit_sect.h"
+#include "nrf_802154_critical_section.h"
+
+
+
 /* nRF54L15 precondition ramp-up [us] — from NCS mrt rsch (RAAL=0 on bare-metal). */
 #define PREC_TIMER_GRANULARITY_MARGIN  1U
 #define PREC_IRQ_HANDLER_PROC_TIME       51U
@@ -35,6 +40,10 @@
                                           PREC_TIMER_GRANULARITY_MARGIN + PREC_RAMP_UP_MARGIN)
 
 #define RSCH_DLY_TS_POOL_SIZE NRF_802154_RSCH_DLY_TS_SLOTS
+
+#define RSCH_EVT_NONE ((uint8_t)0xFFU)
+
+static volatile uint8_t m_rsch_pending_evt;
 
 typedef struct
 {
@@ -49,9 +58,58 @@ static rsch_prio_t        m_last_notified_prio;
 static bool               m_hfclk_ready;
 static rsch_dly_ts_slot_t m_dly_ts[RSCH_DLY_TS_POOL_SIZE];
 
-static bool hfclk_is_actually_ready(void)
+/*
+ * Internal helpers below assume the RSCH MCU critical section is already held
+ * unless noted otherwise. Use nrf_802154_sl_mcu_critical_enter/exit at API entry points.
+ */
+
+static bool hfclk_is_actually_ready_locked(void)
 {
     return m_hfclk_ready || nrf_802154_clock_hfclk_is_running();
+}
+
+static void rsch_pending_evt_set(rsch_prio_t prio)
+{
+    uint8_t value;
+    do {
+        value = (uint8_t)__LDREXB((volatile uint8_t *)&m_rsch_pending_evt);
+        (void)value;
+    } while (__STREXB((uint8_t)prio, (volatile uint8_t *)&m_rsch_pending_evt));
+    __DMB();
+}
+
+static rsch_prio_t rsch_pending_evt_clear(void)
+{
+    uint8_t value;
+    do {
+        value = __LDREXB((volatile uint8_t *)&m_rsch_pending_evt);
+    } while (__STREXB((uint8_t)RSCH_EVT_NONE, (volatile uint8_t *)&m_rsch_pending_evt));
+    __DMB();
+    return (rsch_prio_t)value;
+}
+
+static bool rsch_pending_evt_is_none(void)
+{
+    return m_rsch_pending_evt == RSCH_EVT_NONE;
+}
+
+static void rsch_notify_prio(rsch_prio_t approved_prio)
+{
+    bool entered = nrf_802154_critical_section_enter();
+
+    if (entered && rsch_pending_evt_is_none())
+    {
+        nrf_802154_rsch_crit_sect_prio_changed(approved_prio);
+    }
+    else
+    {
+        rsch_pending_evt_set(approved_prio);
+    }
+
+    if (entered)
+    {
+        nrf_802154_critical_section_exit();
+    }
 }
 
 static rsch_dly_ts_slot_t *slot_find_by_id(rsch_dly_ts_id_t id)
@@ -112,11 +170,37 @@ static bool slot_op_limit_ok(rsch_dly_ts_op_t op)
         return false;
     }
 }
+static bool delayed_precise_slot_in_use(void)
+{
+    for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
+    {
+        if (m_dly_ts[i].in_use &&
+            (m_dly_ts[i].param.type == RSCH_DLY_TS_TYPE_PRECISE))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 static rsch_prio_t delayed_max_prio_get(void)
 {
     rsch_prio_t max_prio = RSCH_PRIO_IDLE;
-    uint64_t    now      = nrf_802154_sl_timer_current_time_get();
+    /* No PRECISE delayed slots → no ramp-up time check → skip GRTC read. */
+    if (!delayed_precise_slot_in_use())
+    {
+        for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
+        {
+            if (m_dly_ts[i].in_use && (m_dly_ts[i].param.prio > max_prio))
+            {
+                max_prio = m_dly_ts[i].param.prio;
+            }
+        }
+        return max_prio;
+    }
+    uint64_t now = nrf_802154_sl_timer_current_time_get();
+
 
     for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
     {
@@ -162,7 +246,7 @@ static rsch_prio_t required_prio_lvl_get(void)
 static rsch_prio_t approved_prio_lvl_get(void)
 {
     /* HFCLK is the only RSCH precondition on bare-metal; when running it satisfies any op. */
-    return hfclk_is_actually_ready() ? RSCH_PRIO_MAX : RSCH_PRIO_IDLE;
+    return hfclk_is_actually_ready_locked() ? RSCH_PRIO_MAX : RSCH_PRIO_IDLE;
 }
 
 static void all_prec_update(void)
@@ -180,31 +264,43 @@ static void all_prec_update(void)
         if (new_prio == RSCH_PRIO_IDLE)
         {
             nrf_802154_clock_hfclk_stop();
-            m_hfclk_ready = false;
+            if (!nrf_802154_clock_hfclk_is_running())
+            {
+                m_hfclk_ready = false;
+            }
         }
         else if (!m_hfclk_ready)
         {
             nrf_802154_clock_hfclk_start();
         }
     }
-    else if ((new_prio > RSCH_PRIO_IDLE) && !m_hfclk_ready)
+   /* else if ((new_prio > RSCH_PRIO_IDLE) && !m_hfclk_ready)
     {
         nrf_802154_clock_hfclk_start();
-    }
+    }*/
 }
 
 static void notify_core(void)
 {
-    rsch_prio_t approved_prio = approved_prio_lvl_get();
+    nrf_802154_sl_mcu_critical_state_t cs;
+    rsch_prio_t                        approved;
 
     // #region agent log
     g_nrf54_debug_stats.rsch_notify_core++;
     // #endregion
 
-    if (m_last_notified_prio != approved_prio)
+    nrf_802154_sl_mcu_critical_enter(cs);
+    approved = approved_prio_lvl_get();
+
+    if (m_last_notified_prio != approved)
     {
-        m_last_notified_prio = approved_prio;
-        nrf_802154_rsch_continuous_prio_changed(approved_prio);
+        m_last_notified_prio = approved;
+        nrf_802154_sl_mcu_critical_exit(cs);
+        rsch_notify_prio(approved);
+    }
+    else
+    {
+        nrf_802154_sl_mcu_critical_exit(cs);
     }
 }
 
@@ -228,9 +324,12 @@ static void delayed_timeslot_start(nrf_802154_sl_timer_t *p_timer);
 
 static void delayed_timeslot_prec_request(nrf_802154_sl_timer_t *p_timer)
 {
-    rsch_dly_ts_slot_t *slot = p_timer->user_data.p_pointer;
+    rsch_dly_ts_slot_t                 *slot = p_timer->user_data.p_pointer;
+    nrf_802154_sl_mcu_critical_state_t  cs;
 
+    nrf_802154_sl_mcu_critical_enter(cs);
     all_prec_update();
+    nrf_802154_sl_mcu_critical_exit(cs);
 
     timer_configure(slot, slot->param.trigger_time);
     slot->timer.action.callback.callback = delayed_timeslot_start;
@@ -240,23 +339,34 @@ static void delayed_timeslot_prec_request(nrf_802154_sl_timer_t *p_timer)
 
 static void delayed_timeslot_start(nrf_802154_sl_timer_t *p_timer)
 {
-    rsch_dly_ts_slot_t *slot = p_timer->user_data.p_pointer;
+    rsch_dly_ts_slot_t                 *slot = p_timer->user_data.p_pointer;
+    nrf_802154_sl_mcu_critical_state_t  cs;
+    bool                                reschedule = false;
+
+    nrf_802154_sl_mcu_critical_enter(cs);
 
     // #region agent log
-    if ((slot->param.prio > RSCH_PRIO_IDLE) && !m_hfclk_ready)
+    if ((slot->param.prio > RSCH_PRIO_IDLE) && !hfclk_is_actually_ready_locked())
     {
         g_nrf54_debug_stats.rsch_dly_start_no_hfclk++;
+        //all_prec_update();
+        reschedule = true;
+    }
+    else
+    {
+        g_nrf54_debug_stats.rsch_dly_start++;
+    }
+    // #endregion
 
-        all_prec_update();
+    nrf_802154_sl_mcu_critical_exit(cs);
 
+    if (reschedule)
+    {
         timer_configure(slot, nrf_802154_sl_timer_current_time_get() + PREC_TIMER_GRANULARITY_MARGIN);
         slot->timer.action.callback.callback = delayed_timeslot_start;
         (void)nrf_802154_sl_timer_add(&slot->timer);
         return;
     }
-
-    g_nrf54_debug_stats.rsch_dly_start++;
-    // #endregion
 
     if (slot->param.started_callback != NULL)
     {
@@ -265,8 +375,10 @@ static void delayed_timeslot_start(nrf_802154_sl_timer_t *p_timer)
 
     if (slot->param.type == RSCH_DLY_TS_TYPE_PRECISE)
     {
+        nrf_802154_sl_mcu_critical_enter(cs);
         slot->param.prio = RSCH_PRIO_IDLE;
-        all_prec_update();
+        //all_prec_update();
+        nrf_802154_sl_mcu_critical_exit(cs);
         notify_core();
     }
 }
@@ -274,13 +386,17 @@ static void delayed_timeslot_start(nrf_802154_sl_timer_t *p_timer)
 static bool relaxed_delayed_timeslot_request(rsch_dly_ts_slot_t      *slot,
                                              const rsch_dly_ts_param_t *p_param)
 {
+    nrf_802154_sl_mcu_critical_state_t cs;
+
+    nrf_802154_sl_mcu_critical_enter(cs);
     slot->param  = *p_param;
     slot->in_use = true;
+    all_prec_update();
+    nrf_802154_sl_mcu_critical_exit(cs);
 
     timer_configure(slot, p_param->trigger_time);
     slot->timer.action.callback.callback = delayed_timeslot_start;
 
-    all_prec_update();
     notify_core();
 
     return nrf_802154_sl_timer_add(&slot->timer) == NRF_802154_SL_TIMER_RET_SUCCESS;
@@ -289,33 +405,42 @@ static bool relaxed_delayed_timeslot_request(rsch_dly_ts_slot_t      *slot,
 static bool precise_delayed_timeslot_request(rsch_dly_ts_slot_t      *slot,
                                              const rsch_dly_ts_param_t *p_param)
 {
-    uint64_t now      = nrf_802154_sl_timer_current_time_get();
-    uint64_t req_time = p_param->trigger_time - PREC_RAMP_UP_TIME;
+    uint64_t                           now      = nrf_802154_sl_timer_current_time_get();
+    uint64_t                           req_time = p_param->trigger_time - PREC_RAMP_UP_TIME;
+    bool                               hfclk_approved;
+    nrf_802154_sl_mcu_critical_state_t cs;
 
     if (nrf_802154_sl_time64_is_in_future(now, req_time))
     {
+        nrf_802154_sl_mcu_critical_enter(cs);
         slot->param  = *p_param;
         slot->in_use = true;
+        all_prec_update();
+        nrf_802154_sl_mcu_critical_exit(cs);
 
         timer_configure(slot, req_time);
         slot->timer.action.callback.callback = delayed_timeslot_prec_request;
 
-        all_prec_update();
         notify_core();
 
         return nrf_802154_sl_timer_add(&slot->timer) == NRF_802154_SL_TIMER_RET_SUCCESS;
     }
 
-    if ((approved_prio_lvl_get() >= RSCH_PRIO_IDLE_LISTENING) &&
-        nrf_802154_sl_time64_is_in_future(now, p_param->trigger_time))
+    nrf_802154_sl_mcu_critical_enter(cs);
+    hfclk_approved = approved_prio_lvl_get() >= RSCH_PRIO_IDLE_LISTENING;
+    nrf_802154_sl_mcu_critical_exit(cs);
+
+    if (hfclk_approved && nrf_802154_sl_time64_is_in_future(now, p_param->trigger_time))
     {
+        nrf_802154_sl_mcu_critical_enter(cs);
         slot->param  = *p_param;
         slot->in_use = true;
+        all_prec_update();
+        nrf_802154_sl_mcu_critical_exit(cs);
 
         timer_configure(slot, p_param->trigger_time);
         slot->timer.action.callback.callback = delayed_timeslot_start;
 
-        all_prec_update();
         notify_core();
 
         return nrf_802154_sl_timer_add(&slot->timer) == NRF_802154_SL_TIMER_RET_SUCCESS;
@@ -359,6 +484,10 @@ void nrf_802154_rsch_init(void)
 
 void nrf_802154_rsch_uninit(void)
 {
+    nrf_802154_sl_mcu_critical_state_t cs;
+
+    nrf_802154_sl_mcu_critical_enter(cs);
+
     for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
     {
         if (m_dly_ts[i].in_use)
@@ -367,13 +496,19 @@ void nrf_802154_rsch_uninit(void)
             m_dly_ts[i].in_use = false;
         }
     }
+
+    nrf_802154_sl_mcu_critical_exit(cs);
 }
 
 void nrf_802154_rsch_continuous_mode_priority_set(rsch_prio_t prio)
 {
-    m_continuous_prio = prio;
+    nrf_802154_sl_mcu_critical_state_t cs;
 
+    nrf_802154_sl_mcu_critical_enter(cs);
+    m_continuous_prio = prio;
     all_prec_update();
+    nrf_802154_sl_mcu_critical_exit(cs);
+
     notify_core();
 }
 
@@ -384,11 +519,16 @@ void nrf_802154_rsch_continuous_ended(void)
 
 bool nrf_802154_rsch_timeslot_request(uint32_t length_us, rsch_timeslot_prio_t prio)
 {
-    
+    bool                               ready;
+    nrf_802154_sl_mcu_critical_state_t cs;
+
     (void)length_us;
     (void)prio;
 
-    if (!hfclk_is_actually_ready())
+    nrf_802154_sl_mcu_critical_enter(cs);
+    ready = hfclk_is_actually_ready_locked();
+
+    if (!ready)
     {
         if (m_continuous_prio < RSCH_PRIO_MAX)
         {
@@ -396,8 +536,13 @@ bool nrf_802154_rsch_timeslot_request(uint32_t length_us, rsch_timeslot_prio_t p
         }
 
         all_prec_update();
-        notify_core();
+    }
 
+    nrf_802154_sl_mcu_critical_exit(cs);
+
+    if (!ready)
+    {
+        notify_core();
         return false;
     }
 
@@ -406,27 +551,44 @@ bool nrf_802154_rsch_timeslot_request(uint32_t length_us, rsch_timeslot_prio_t p
 
 bool nrf_802154_rsch_timeslot_is_requested(void)
 {
+    bool                               result = false;
+    nrf_802154_sl_mcu_critical_state_t cs;
+
+    nrf_802154_sl_mcu_critical_enter(cs);
+
     if (m_requested_prio > RSCH_PRIO_IDLE)
     {
-        return true;
+        result = true;
     }
-
-    for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
+    else
     {
-        if (m_dly_ts[i].in_use)
+        for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
         {
-            return true;
+            if (m_dly_ts[i].in_use)
+            {
+                result = true;
+                break;
+            }
         }
     }
 
-    return false;
+    nrf_802154_sl_mcu_critical_exit(cs);
+
+    return result;
 }
 
 bool nrf_802154_rsch_prec_is_approved(rsch_prec_t prec, rsch_prio_t prio)
 {
+    bool                               result;
+    nrf_802154_sl_mcu_critical_state_t cs;
+
     (void)prec;
 
-    return approved_prio_lvl_get() >= prio;
+    nrf_802154_sl_mcu_critical_enter(cs);
+    result = approved_prio_lvl_get() >= prio;
+    nrf_802154_sl_mcu_critical_exit(cs);
+
+    return result;
 }
 
 uint32_t nrf_802154_rsch_timeslot_us_left_get(void)
@@ -436,15 +598,18 @@ uint32_t nrf_802154_rsch_timeslot_us_left_get(void)
 
 void nrf_802154_clock_hfclk_ready(void)
 {
+    nrf_802154_sl_mcu_critical_state_t cs;
+
     // #region agent log
     g_nrf54_debug_stats.hfclk_ready_calls++;
     // #endregion
 
+    nrf_802154_sl_mcu_critical_enter(cs);
     m_hfclk_ready = true;
+    nrf_802154_sl_mcu_critical_exit(cs);
+
     notify_core();
 }
-
-
 
 void nrf_802154_rsch_crit_sect_prio_request(rsch_prio_t prio)
 {
@@ -453,6 +618,7 @@ void nrf_802154_rsch_crit_sect_prio_request(rsch_prio_t prio)
 
 void nrf_802154_rsch_crit_sect_init(void)
 {
+    m_rsch_pending_evt = RSCH_EVT_NONE;
 }
 
 void nrf_802154_critical_section_rsch_enter(void)
@@ -461,11 +627,17 @@ void nrf_802154_critical_section_rsch_enter(void)
 
 void nrf_802154_critical_section_rsch_exit(void)
 {
+    rsch_prio_t evt = rsch_pending_evt_clear();
+
+    if (evt != RSCH_EVT_NONE)
+    {
+        nrf_802154_rsch_crit_sect_prio_changed(evt);
+    }
 }
 
 bool nrf_802154_critical_section_rsch_event_is_pending(void)
 {
-    return false;
+    return !rsch_pending_evt_is_none();
 }
 
 void nrf_802154_critical_section_rsch_process_pending(void)
@@ -474,8 +646,9 @@ void nrf_802154_critical_section_rsch_process_pending(void)
 
 bool nrf_802154_rsch_delayed_timeslot_request(const rsch_dly_ts_param_t *p_dly_ts_param)
 {
-    rsch_dly_ts_slot_t *slot;
-    bool                result = false;
+    rsch_dly_ts_slot_t                 *slot;
+    bool                                result = false;
+    nrf_802154_sl_mcu_critical_state_t  cs;
 
     if ((p_dly_ts_param == NULL) ||
         (p_dly_ts_param->started_callback == NULL) ||
@@ -484,7 +657,10 @@ bool nrf_802154_rsch_delayed_timeslot_request(const rsch_dly_ts_param_t *p_dly_t
         return false;
     }
 
+    nrf_802154_sl_mcu_critical_enter(cs);
     slot = slot_alloc(p_dly_ts_param);
+    nrf_802154_sl_mcu_critical_exit(cs);
+
     if (slot == NULL)
     {
         return false;
@@ -507,8 +683,10 @@ bool nrf_802154_rsch_delayed_timeslot_request(const rsch_dly_ts_param_t *p_dly_t
 
     if (!result)
     {
+        nrf_802154_sl_mcu_critical_enter(cs);
         slot->in_use = false;
         all_prec_update();
+        nrf_802154_sl_mcu_critical_exit(cs);
         notify_core();
     }
 
@@ -517,27 +695,35 @@ bool nrf_802154_rsch_delayed_timeslot_request(const rsch_dly_ts_param_t *p_dly_t
 
 bool nrf_802154_rsch_delayed_timeslot_cancel(rsch_dly_ts_id_t dly_ts_id, bool handler)
 {
-    rsch_dly_ts_slot_t       *slot = slot_find_by_id(dly_ts_id);
-    nrf_802154_sl_timer_ret_t ret;
-    bool                      was_active;
+    rsch_dly_ts_slot_t                 *slot;
+    nrf_802154_sl_timer_ret_t           ret;
+    bool                                was_active = false;
+    rsch_dly_ts_type_t                  slot_type  = RSCH_DLY_TS_TYPE_RELAXED;
+    nrf_802154_sl_mcu_critical_state_t  cs;
 
     (void)handler;
+
+    nrf_802154_sl_mcu_critical_enter(cs);
+    slot = slot_find_by_id(dly_ts_id);
+    if (slot != NULL)
+    {
+        ret        = nrf_802154_sl_timer_remove(&slot->timer);
+        was_active = (ret == NRF_802154_SL_TIMER_RET_SUCCESS);
+        slot_type  = slot->param.type;
+        slot->param.prio = RSCH_PRIO_IDLE;
+        slot->in_use      = false;
+        all_prec_update();
+    }
+    nrf_802154_sl_mcu_critical_exit(cs);
 
     if (slot == NULL)
     {
         return false;
     }
 
-    ret        = nrf_802154_sl_timer_remove(&slot->timer);
-    was_active = (ret == NRF_802154_SL_TIMER_RET_SUCCESS);
-
-    slot->param.prio = RSCH_PRIO_IDLE;
-    slot->in_use     = false;
-
-    all_prec_update();
     notify_core();
 
-    switch (slot->param.type)
+    switch (slot_type)
     {
     case RSCH_DLY_TS_TYPE_PRECISE:
         return was_active;
@@ -551,16 +737,22 @@ bool nrf_802154_rsch_delayed_timeslot_cancel(rsch_dly_ts_id_t dly_ts_id, bool ha
 bool nrf_802154_rsch_delayed_timeslot_priority_update(rsch_dly_ts_id_t dly_ts_id,
                                                       rsch_prio_t      dly_ts_prio)
 {
-    rsch_dly_ts_slot_t *slot = slot_find_by_id(dly_ts_id);
+    rsch_dly_ts_slot_t                 *slot;
+    nrf_802154_sl_mcu_critical_state_t  cs;
+
+    nrf_802154_sl_mcu_critical_enter(cs);
+    slot = slot_find_by_id(dly_ts_id);
 
     if ((slot == NULL) || (slot->param.prio == RSCH_PRIO_IDLE))
     {
+        nrf_802154_sl_mcu_critical_exit(cs);
         return false;
     }
 
     slot->param.prio = dly_ts_prio;
-
     all_prec_update();
+    nrf_802154_sl_mcu_critical_exit(cs);
+
     notify_core();
 
     return true;
@@ -568,6 +760,10 @@ bool nrf_802154_rsch_delayed_timeslot_priority_update(rsch_dly_ts_id_t dly_ts_id
 
 bool nrf_802154_rsch_delayed_timeslot_ppi_update(uint32_t ppi_channel)
 {
+    nrf_802154_sl_mcu_critical_state_t cs;
+
+    nrf_802154_sl_mcu_critical_enter(cs);
+
     for (uint32_t i = 0; i < RSCH_DLY_TS_POOL_SIZE; i++)
     {
         rsch_dly_ts_slot_t *slot = &m_dly_ts[i];
@@ -581,11 +777,14 @@ bool nrf_802154_rsch_delayed_timeslot_ppi_update(uint32_t ppi_channel)
         {
             nrf_802154_sl_timer_ret_t ret;
 
+            nrf_802154_sl_mcu_critical_exit(cs);
             ret = nrf_802154_sl_timer_update_ppi(&slot->timer, ppi_channel);
 
             return ret == NRF_802154_SL_TIMER_RET_SUCCESS;
         }
     }
+
+    nrf_802154_sl_mcu_critical_exit(cs);
 
     return true;
 }
@@ -593,20 +792,34 @@ bool nrf_802154_rsch_delayed_timeslot_ppi_update(uint32_t ppi_channel)
 bool nrf_802154_rsch_delayed_timeslot_time_to_start_get(rsch_dly_ts_id_t dly_ts_id,
                                                         uint64_t       * p_time_to_start)
 {
-    rsch_dly_ts_slot_t *slot = slot_find_by_id(dly_ts_id);
-    uint64_t            now;
+    rsch_dly_ts_slot_t                 *slot;
+    uint64_t                            now;
+    uint64_t                            trigger_time;
+    nrf_802154_sl_mcu_critical_state_t  cs;
 
-    if ((slot == NULL) || (p_time_to_start == NULL))
+    if (p_time_to_start == NULL)
     {
         return false;
     }
 
-    now               = nrf_802154_sl_timer_current_time_get();
-    *p_time_to_start  = 0;
+    nrf_802154_sl_mcu_critical_enter(cs);
+    slot = slot_find_by_id(dly_ts_id);
 
-    if (nrf_802154_sl_time64_is_in_future(now, slot->param.trigger_time))
+    if (slot == NULL)
     {
-        *p_time_to_start = slot->param.trigger_time - now;
+        nrf_802154_sl_mcu_critical_exit(cs);
+        return false;
+    }
+
+    trigger_time = slot->param.trigger_time;
+    nrf_802154_sl_mcu_critical_exit(cs);
+
+    now              = nrf_802154_sl_timer_current_time_get();
+    *p_time_to_start = 0;
+
+    if (nrf_802154_sl_time64_is_in_future(now, trigger_time))
+    {
+        *p_time_to_start = trigger_time - now;
     }
 
     return true;
@@ -626,8 +839,5 @@ void nrf_802154_clock_hfclk_latency_set(uint32_t latency_us)
 
 void nrf_802154_rsch_continuous_prio_changed(rsch_prio_t prio)
 {
-    /* Bare-metal: no crit-sect RSCH event queue; core handler is safe to call directly. */
-    extern void nrf_802154_rsch_crit_sect_prio_changed(rsch_prio_t prio);
-
-    nrf_802154_rsch_crit_sect_prio_changed(prio);
+    rsch_notify_prio(prio);
 }

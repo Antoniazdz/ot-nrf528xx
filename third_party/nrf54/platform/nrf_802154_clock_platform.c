@@ -27,6 +27,7 @@
 #endif
 
 static uint8_t mLfclkUsers;
+static uint8_t mHfclkUsers;
 
 static void lfclk_evt_handler(nrfx_clock_lfclk_evt_type_t event)
 {
@@ -153,6 +154,7 @@ void nrf_802154_clock_deinit(void)
     NVIC_ClearPendingIRQ(CLOCK_POWER_IRQn);
 
     mLfclkUsers = 0;
+    mHfclkUsers = 0;
 
     hfclk_drv_uninit();
 
@@ -164,20 +166,33 @@ void nrf_802154_clock_deinit(void)
 
 void nrf_802154_clock_hfclk_start(void)
 {
-    if (hfclk_running_check())
+    if (mHfclkUsers == UINT8_MAX) { return; }
+    if (mHfclkUsers++ == 0)
+    {
+        if (hfclk_running_check())
+        {
+            nrf_802154_clock_hfclk_ready();
+        }
+        else
+        {
+            hfclk_drv_start();
+        }
+    }
+   /* else if (hfclk_running_check())
     {
         nrf_802154_clock_hfclk_ready();
-        return;
-    }
-
-    hfclk_drv_start();
+    }*/
 }
 
 void nrf_802154_clock_hfclk_stop(void)
 {
-    if (hfclk_running_check())
+    
+    if ((mHfclkUsers > 0) && (--mHfclkUsers == 0))
     {
-        hfclk_drv_stop();
+        if (hfclk_running_check())
+        {
+            hfclk_drv_stop();
+        }
     }
 }
 

@@ -32,6 +32,11 @@
  
  #include "platform/nrf_802154_platform_sl_lptimer.h"
  #include "timer/nrf_802154_timer_coord.h"
+
+ #include "nrf54_debug_stats.h"
+
+ 
+ #define MIN_LPTICK_COMPARE_EVENT_TICKS 2ULL
  
  typedef struct
  {
@@ -141,18 +146,40 @@
  
          if (mutex_trylock(&m_timer_mutex))
          {
-             if ((p_head == NULL) || !timer_has_callback((const nrf_802154_sl_timer_t *)p_head))
-             {
-                 nrf_802154_platform_sl_lptimer_disable();
-             }
-             else if (p_head == mp_head)
-             {
-                 uint64_t fire_lpticks = sl_timer_priv((nrf_802154_sl_timer_t *)p_head)->fire_lpticks;
- 
-                 nrf_802154_platform_sl_lptimer_schedule_at(fire_lpticks);
-             }
- 
-             mutex_unlock(&m_timer_mutex);
+            if ((p_head == NULL) || !timer_has_callback((const nrf_802154_sl_timer_t *)p_head))
+            {
+                nrf_802154_platform_sl_lptimer_disable();
+                mutex_unlock(&m_timer_mutex);
+            }
+            else if (p_head == mp_head)
+            {
+                nrf_802154_sl_timer_t *p_head_timer = (nrf_802154_sl_timer_t *)p_head;
+                uint64_t               fire_lpticks;
+                uint64_t               now_lpticks;
+                bool                   fire_immediately;
+
+                fire_lpticks = nrf_802154_platform_sl_lptimer_us_to_lpticks_convert(p_head_timer->trigger_time,
+                                                                                    false);
+                sl_timer_priv(p_head_timer)->fire_lpticks = fire_lpticks;
+
+                now_lpticks      = nrf_802154_platform_sl_lptimer_current_lpticks_get();
+                fire_immediately = fire_lpticks <= now_lpticks;
+
+                mutex_unlock(&m_timer_mutex);
+
+                if (fire_immediately)
+                {
+                    g_nrf54_debug_stats.sl_timer_fire_immediate++;
+                    nrf_802154_sl_timer_handler(now_lpticks);
+                    continue;
+                }
+
+                nrf_802154_platform_sl_lptimer_schedule_at(fire_lpticks);
+            }
+            else
+            {
+                mutex_unlock(&m_timer_mutex);
+            }
          }
      } while (queue_cntr != m_queue_changed_cntr);
  }
@@ -326,38 +353,37 @@
  
  void nrf_802154_sl_timer_handler(uint64_t now_lpticks)
  {
+    g_nrf54_debug_stats.sl_timer_handler_enter++;
      uint64_t now_us = nrf_802154_platform_sl_lptimer_lpticks_to_us_convert(now_lpticks);
  
      if (mutex_trylock(&m_fired_mutex))
      {
          nrf_802154_sl_timer_t *p_timer = (nrf_802154_sl_timer_t *)mp_head;
- 
+         nrf_802154_sl_timer_callback_t callback = NULL;
+         bool                              was_in_queue = false;
+
          if ((p_timer != NULL) && (p_timer->trigger_time <= now_us))
          {
-             nrf_802154_sl_timer_callback_t callback = NULL;
- 
              if (timer_has_callback(p_timer))
              {
                  callback = p_timer->action.callback.callback;
              }
- 
+
              if (timer_has_hardware(p_timer))
              {
                  sl_timer_priv(p_timer)->hw_fired = true;
                  (void)nrf_802154_platform_sl_lptimer_hw_task_cleanup();
              }
- 
-             bool was_in_queue;
- 
+
              (void)timer_remove(p_timer, &was_in_queue);
- 
-             if (was_in_queue && (callback != NULL))
-             {
-                 callback(p_timer);
-             }
          }
- 
+
          mutex_unlock(&m_fired_mutex);
+
+         if (was_in_queue && (callback != NULL))
+         {
+             callback(p_timer);
+         }
      }
  
      handle_timer();

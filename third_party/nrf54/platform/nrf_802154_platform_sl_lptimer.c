@@ -46,6 +46,7 @@
  #endif
  
  #if !NRF54_LPTIMER_CC2_STUB_BISECT
+ #include "nrf_802154_sl_timer.h"
  #include "nrf_802154_sl_utils.h"
  #endif
  
@@ -65,7 +66,9 @@
  /* -------------------------------------------------------------------------- */
  
  #if !NRF54_LPTIMER_CC2_STUB_BISECT
- 
+
+ #define MIN_LPTICK_COMPARE_EVENT_TICKS 2ULL
+
  static volatile bool       m_enabled;
  static bool                m_compare_int_was_enabled;
  static uint8_t             m_callbacks_channel;
@@ -92,9 +95,25 @@
          (void)nrfx_grtc_syscounter_cc_int_enable(aChannel);
      }
  }
- 
+
+ /*
+  * Full CC disarm: INT off, compare event off, clear pending. Do not re-enable INT
+  * (compare_int_unlock after disable was re-arming INTEN while m_enabled==false).
+  */
+ static void compare_channel_disarm(uint8_t aChannel)
+ {
+     (void)nrfx_grtc_syscounter_cc_int_disable(aChannel);
+     (void)nrfx_grtc_syscounter_cc_disable(aChannel);
+
+     if (nrfy_grtc_sys_counter_compare_event_check(NRF_GRTC, aChannel))
+     {
+         nrfy_grtc_sys_counter_compare_event_clear(NRF_GRTC, aChannel);
+     }
+ }
+
  static void timer_compare_handler(int32_t aChannel, uint64_t aExpireTime, void *aUserData)
  {
+     g_nrf54_debug_stats.compare_handler_enter++;
      uint64_t curr_ticks;
  
      (void)aUserData;
@@ -117,14 +136,28 @@
  
  static void compare_schedule(uint8_t aChannel, nrfx_grtc_channel_t *aChannelData, uint64_t aFireLpticks)
  {
+     uint64_t now_lpticks = nrfx_grtc_syscounter_get();
+
      /*
-      * Match NCS lptimer_grtc.c / pre-bisect git: disable → set → always enable CC int.
+      * Past compare does not reliably raise CC2 IRQ (nrfx clears the event on set).
+      * Clamp to now + margin and arm CC — do not call sl_timer_handler here: that
+      * re-enters handle_timer/schedule_at and can recurse while m_fired_mutex is held
+      * in the timer callback (GDB "finish" never returns).
+      */
+     if (aFireLpticks <= now_lpticks + MIN_LPTICK_COMPARE_EVENT_TICKS)
+     {
+         aFireLpticks = now_lpticks + MIN_LPTICK_COMPARE_EVENT_TICKS;
+     }
+
+     /*
+      * Match NCS lptimer_grtc.c: disable → set → always enable CC int (also in radio crit).
       * Do not use compare_int_unlock() here — if the channel was not yet enabled,
       * unlock leaves CC2 IRQ off and sl_timer_handler never runs under thread start.
       */
      (void)nrfx_grtc_syscounter_cc_int_disable(aChannel);
      (void)nrfx_grtc_syscounter_cc_absolute_set(aChannelData, aFireLpticks, true);
      (void)nrfx_grtc_syscounter_cc_int_enable(aChannel);
+     nrfy_grtc_sys_counter_compare_event_enable(NRF_GRTC, aChannel);
  }
  
  #endif // !NRF54_LPTIMER_CC2_STUB_BISECT
@@ -250,7 +283,7 @@
      {
          return 0;
      }
- 
+
      return nrfx_grtc_syscounter_get();
  }
  
@@ -284,13 +317,8 @@
  void nrf_802154_platform_sl_lptimer_disable(void)
  {
  #if !NRF54_LPTIMER_CC2_STUB_BISECT
-     bool irq_key;
- 
      m_enabled = false;
- 
-     irq_key = compare_int_lock(m_callbacks_channel);
-     (void)nrfx_grtc_syscounter_cc_disable(m_callbacks_channel);
-     compare_int_unlock(m_callbacks_channel, irq_key);
+     compare_channel_disarm(m_callbacks_channel);
  #endif
  }
  
