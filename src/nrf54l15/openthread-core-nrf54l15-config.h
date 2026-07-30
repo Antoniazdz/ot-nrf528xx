@@ -97,4 +97,14 @@
 #define OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER 0
 #endif
 
+/**
+ * @def OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
+ *
+ * Required for platform TX security (nrf54ProcessTransmitSecurity / otMacFrameProcessTransmitAesCcm)
+ * and Enh-ACK / CSL IE handling — same as nRF52840.
+ */
+#ifndef OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
+#define OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT 1
+#endif
+
 #endif // OPENTHREAD_CORE_NRF54L15_CONFIG_H_
