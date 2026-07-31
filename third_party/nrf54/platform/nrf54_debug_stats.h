@@ -25,6 +25,9 @@ typedef struct
     uint32_t rsch_dly_start_no_hfclk;
     uint32_t rsch_all_prec_update;
     uint32_t rsch_notify_core;
+    uint32_t rsch_pending_set;
+    uint32_t rsch_process_pending;
+    uint32_t rsch_process_pending_done;
     uint32_t tx_fail_busy_channel;
     uint32_t hfclk_ready_calls;
 

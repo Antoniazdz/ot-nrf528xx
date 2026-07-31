@@ -85,7 +85,7 @@
  * Interrupt priority for GRTC (OT ms/us alarms).
  */
 #ifndef OT_GRTC_IRQ_PRIORITY
-#define OT_GRTC_IRQ_PRIORITY 1
+#define OT_GRTC_IRQ_PRIORITY 6
 #endif
 
 /**

@@ -71,6 +71,9 @@ static bool hfclk_is_actually_ready_locked(void)
 static void rsch_pending_evt_set(rsch_prio_t prio)
 {
     uint8_t value;
+
+    g_nrf54_debug_stats.rsch_pending_set++;
+
     do {
         value = (uint8_t)__LDREXB((volatile uint8_t *)&m_rsch_pending_evt);
         (void)value;
@@ -91,6 +94,15 @@ static rsch_prio_t rsch_pending_evt_clear(void)
 static bool rsch_pending_evt_is_none(void)
 {
     return m_rsch_pending_evt == RSCH_EVT_NONE;
+}
+
+static void rsch_evt_process(rsch_prio_t evt)
+{
+    if (evt != RSCH_EVT_NONE)
+    {
+        g_nrf54_debug_stats.rsch_process_pending_done++;
+        nrf_802154_rsch_crit_sect_prio_changed(evt);
+    }
 }
 
 static void rsch_notify_prio(rsch_prio_t approved_prio)
@@ -245,8 +257,8 @@ static rsch_prio_t required_prio_lvl_get(void)
 
 static rsch_prio_t approved_prio_lvl_get(void)
 {
-    /* HFCLK is the only RSCH precondition on bare-metal; when running it satisfies any op. */
-    return hfclk_is_actually_ready_locked() ? RSCH_PRIO_MAX : RSCH_PRIO_IDLE;
+    /* Match nRF52 RSCH_PREC_HFCLK: approved only after hfclk_ready callback. */
+    return m_hfclk_ready ? RSCH_PRIO_MAX : RSCH_PRIO_IDLE;
 }
 
 static void all_prec_update(void)
@@ -264,20 +276,19 @@ static void all_prec_update(void)
         if (new_prio == RSCH_PRIO_IDLE)
         {
             nrf_802154_clock_hfclk_stop();
-            if (!nrf_802154_clock_hfclk_is_running())
-            {
-                m_hfclk_ready = false;
-            }
+            m_hfclk_ready = false;
         }
-        else if (!m_hfclk_ready)
+        else
         {
+            /* nRF52: unconditional hfclk_start on every non-IDLE transition. */
             nrf_802154_clock_hfclk_start();
         }
     }
-   /* else if ((new_prio > RSCH_PRIO_IDLE) && !m_hfclk_ready)
+    else if ((new_prio > RSCH_PRIO_IDLE) && !hfclk_is_actually_ready_locked())
     {
+        /* Prio unchanged but HFCLK dropped (stop/race) — restart without waiting for transition. */
         nrf_802154_clock_hfclk_start();
-    }*/
+    }
 }
 
 static void notify_core(void)
@@ -519,34 +530,29 @@ void nrf_802154_rsch_continuous_ended(void)
 
 bool nrf_802154_rsch_timeslot_request(uint32_t length_us, rsch_timeslot_prio_t prio)
 {
-    bool                               ready;
+    bool                               continuous;
     nrf_802154_sl_mcu_critical_state_t cs;
 
     (void)length_us;
     (void)prio;
 
     nrf_802154_sl_mcu_critical_enter(cs);
-    ready = hfclk_is_actually_ready_locked();
+    continuous = (m_requested_prio > RSCH_PRIO_IDLE);
 
-    if (!ready)
+    if (continuous && !hfclk_is_actually_ready_locked())
     {
-        if (m_continuous_prio < RSCH_PRIO_MAX)
-        {
-            m_continuous_prio = RSCH_PRIO_MAX;
-        }
-
-        all_prec_update();
+        nrf_802154_clock_hfclk_start();
     }
 
     nrf_802154_sl_mcu_critical_exit(cs);
 
-    if (!ready)
+    /* nRF52 RAAL: return true in continuous mode; HFCLK gating is via approved_prio / timeslot_is_granted. */
+    if (continuous)
     {
-        notify_core();
-        return false;
+        return true;
     }
 
-    return true;
+    return hfclk_is_actually_ready_locked();
 }
 
 bool nrf_802154_rsch_timeslot_is_requested(void)
@@ -627,12 +633,7 @@ void nrf_802154_critical_section_rsch_enter(void)
 
 void nrf_802154_critical_section_rsch_exit(void)
 {
-    rsch_prio_t evt = rsch_pending_evt_clear();
-
-    if (evt != RSCH_EVT_NONE)
-    {
-        nrf_802154_rsch_crit_sect_prio_changed(evt);
-    }
+    rsch_evt_process(rsch_pending_evt_clear());
 }
 
 bool nrf_802154_critical_section_rsch_event_is_pending(void)
@@ -642,6 +643,8 @@ bool nrf_802154_critical_section_rsch_event_is_pending(void)
 
 void nrf_802154_critical_section_rsch_process_pending(void)
 {
+    g_nrf54_debug_stats.rsch_process_pending++;
+    rsch_evt_process(rsch_pending_evt_clear());
 }
 
 bool nrf_802154_rsch_delayed_timeslot_request(const rsch_dly_ts_param_t *p_dly_ts_param)

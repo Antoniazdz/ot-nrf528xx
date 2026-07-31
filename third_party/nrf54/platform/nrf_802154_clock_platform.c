@@ -178,10 +178,10 @@ void nrf_802154_clock_hfclk_start(void)
             hfclk_drv_start();
         }
     }
-   /* else if (hfclk_running_check())
+    else if (hfclk_running_check())
     {
         nrf_802154_clock_hfclk_ready();
-    }*/
+    }
 }
 
 void nrf_802154_clock_hfclk_stop(void)
