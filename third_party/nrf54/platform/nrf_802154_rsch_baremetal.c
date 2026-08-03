@@ -303,6 +303,16 @@ static void notify_core(void)
     nrf_802154_sl_mcu_critical_enter(cs);
     approved = approved_prio_lvl_get();
 
+    if (m_hfclk_ready && !hfclk_is_actually_ready_locked())
+    {
+        g_nrf54_debug_stats.rsch_approved_hw_mismatch++;
+    }
+
+    if ((approved == RSCH_PRIO_IDLE) && (m_requested_prio > RSCH_PRIO_IDLE))
+    {
+        g_nrf54_debug_stats.rsch_notify_idle_while_requested++;
+    }
+
     if (m_last_notified_prio != approved)
     {
         m_last_notified_prio = approved;
@@ -359,6 +369,7 @@ static void delayed_timeslot_start(nrf_802154_sl_timer_t *p_timer)
     // #region agent log
     if ((slot->param.prio > RSCH_PRIO_IDLE) && !hfclk_is_actually_ready_locked())
     {
+       
         g_nrf54_debug_stats.rsch_dly_start_no_hfclk++;
         //all_prec_update();
         reschedule = true;
@@ -552,7 +563,13 @@ bool nrf_802154_rsch_timeslot_request(uint32_t length_us, rsch_timeslot_prio_t p
         return true;
     }
 
-    return hfclk_is_actually_ready_locked();
+    if (!hfclk_is_actually_ready_locked())
+    {
+        g_nrf54_debug_stats.rsch_timeslot_request_false++;
+        return false;
+    }
+
+    return true;
 }
 
 bool nrf_802154_rsch_timeslot_is_requested(void)

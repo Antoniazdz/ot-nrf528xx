@@ -28,6 +28,16 @@ typedef struct
     uint32_t rsch_pending_set;
     uint32_t rsch_process_pending;
     uint32_t rsch_process_pending_done;
+    uint32_t rsch_timeslot_request_false;
+    uint32_t rsch_notify_idle_while_requested;
+    uint32_t rsch_approved_hw_mismatch;
+
+    /* nrf_802154_core_transmit() deny path (sync TIMESLOT_DENIED 0x07). */
+    uint32_t tx_core_deny_cs_enter_fail;
+    uint32_t tx_core_deny_terminate_fail;
+    uint32_t tx_core_deny_tx_setup_fail;
+    uint32_t tx_core_deny_tx_init_immediate;
+
     uint32_t tx_fail_busy_channel;
     uint32_t hfclk_ready_calls;
 

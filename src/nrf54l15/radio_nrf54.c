@@ -762,6 +762,7 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
     nrf54ProcessTransmitSecurity(aFrame);
 #endif
 
+
     if (aFrame->mInfo.mTxInfo.mTxDelay != 0)
     {
 #if NRF_802154_DELAYED_TRX_ENABLED
@@ -1498,6 +1499,7 @@ void nrf_802154_tx_started(const uint8_t *aFrame)
     assert(aFrame == sTransmitPsdu);
     OT_UNUSED_VARIABLE(aFrame);
 
+    /* nRF52 model: AES-CCM here, just before on-air TX (core hooks call this in CSMA path). */
     g_nrf54_debug_stats.tx_late_encrypt_hook_enter++;
     nrf54ProcessTransmitSecurity(&sTransmitFrame);
 }
