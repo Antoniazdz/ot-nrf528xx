@@ -369,9 +369,8 @@ static void delayed_timeslot_start(nrf_802154_sl_timer_t *p_timer)
     // #region agent log
     if ((slot->param.prio > RSCH_PRIO_IDLE) && !hfclk_is_actually_ready_locked())
     {
-       
         g_nrf54_debug_stats.rsch_dly_start_no_hfclk++;
-        //all_prec_update();
+        all_prec_update();
         reschedule = true;
     }
     else
@@ -399,7 +398,7 @@ static void delayed_timeslot_start(nrf_802154_sl_timer_t *p_timer)
     {
         nrf_802154_sl_mcu_critical_enter(cs);
         slot->param.prio = RSCH_PRIO_IDLE;
-        //all_prec_update();
+        all_prec_update();
         nrf_802154_sl_mcu_critical_exit(cs);
         notify_core();
     }
