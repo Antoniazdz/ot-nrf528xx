@@ -63,6 +63,7 @@ set(NRF54_RADIO_INCLUDES
     ${NRF54_802154_ROOT}/driver/include
     ${NRF54_802154_ROOT}/driver/src
     ${NRF54_802154_ROOT}/sl/include
+    ${NRF54_802154_ROOT}/sl/sl_opensource/include
     ${NRF54_802154_ROOT}/common/include
     ${PROJECT_SOURCE_DIR}/openthread/include
     ${PROJECT_SOURCE_DIR}/openthread/src
@@ -80,10 +81,21 @@ set(NRF54_CHIP_DEFINES
     -DNRF_APPLICATION
 )
 
+# Variant C spike: SL-binary without MPSL (gate test — see script/spike-c-sl-binary.sh).
+option(NRF54_SPIKE_SL_BINARY "Build variant C spike (libnrf-802154-sl.a, no MPSL)" OFF)
+set(NRF54_SL_BINARY_PATH "${NRF54_ROOT}/bin/libnrf-802154-sl.a"
+    CACHE FILEPATH "Path to libnrf-802154-sl.a (nrf54l15_cpuapp soft-float)")
+
+if(NRF54_SPIKE_SL_BINARY)
+    set(NRF54_802154_PROJECT_CONFIG_FILE "platform-config-spike.h")
+else()
+    set(NRF54_802154_PROJECT_CONFIG_FILE "platform-config.h")
+endif()
+
 set(NRF54_COMMON_DEFINES
     ${NRF54_FLAG}
     ${NRF54_CHIP_DEFINES}
-    -DNRF_802154_PROJECT_CONFIG=\"platform-config.h\"
+    -DNRF_802154_PROJECT_CONFIG=\"${NRF54_802154_PROJECT_CONFIG_FILE}\"
     -D__HEAP_SIZE=0
     -D__STACK_SIZE=2048
 )
@@ -92,7 +104,12 @@ set(NRF54_COMMON_DEFINES
 add_subdirectory(platform)
 
 # Step 2: Nordic 802.15.4 driver via its own CMake.
-set(SL_OPENSOURCE ON CACHE BOOL "Use open-source 802.15.4 Service Layer" FORCE)
+if(NRF54_SPIKE_SL_BINARY)
+    set(SL_OPENSOURCE OFF CACHE BOOL "Use open-source 802.15.4 Service Layer" FORCE)
+    set(NRF_802154_PROJECT_CONFIG platform-config-spike.h CACHE STRING "" FORCE)
+else()
+    set(SL_OPENSOURCE ON CACHE BOOL "Use open-source 802.15.4 Service Layer" FORCE)
+endif()
 
 if(NOT NRF_802154_PROJECT_CONFIG)
     set(NRF_802154_PROJECT_CONFIG platform-config.h)
@@ -107,8 +124,9 @@ target_compile_options(nrf-802154-driver PRIVATE
     "SHELL:-include nordic_common_shim.h"
 )
 
-# Bare-metal sl_timer + rsch live in nrf-802154-platform; exclude Zephyr stubs from SL.
-if(TARGET nrf-802154-sl)
+# Bare-metal sl_timer + rsch live in nrf-802154-platform when SL_OPENSOURCE;
+# exclude duplicate Zephyr SL sources from the open-source library only.
+if(SL_OPENSOURCE AND TARGET nrf-802154-sl)
     get_target_property(_nrf802154_sl_sources nrf-802154-sl SOURCES)
     if(_nrf802154_sl_sources)
         list(FILTER _nrf802154_sl_sources EXCLUDE REGEX "nrf_802154_sl_timer\\.c$")
@@ -123,7 +141,6 @@ target_link_libraries(nrf-802154-platform PRIVATE nrf-802154-sl)
 # Propagate chip defines and include paths to Nordic targets.
 foreach(_nrf802154_lib
     nrf-802154-driver
-    nrf-802154-sl
     nrf-802154-common
     nrf-802154-platform
 )
@@ -134,10 +151,21 @@ foreach(_nrf802154_lib
     target_include_directories(${_nrf802154_lib}
         PRIVATE
             ${NRF54_SDK_INCLUDES}
+            ${NRF54_RADIO_INCLUDES}
             ${PROJECT_SOURCE_DIR}/src/nrf54l15
     )
     target_link_libraries(${_nrf802154_lib} PRIVATE ot-config)
 endforeach()
+
+# Open-source SL is a STATIC library; closed SL is INTERFACE (.a only).
+if(SL_OPENSOURCE)
+    target_compile_definitions(nrf-802154-sl PRIVATE ${NRF54_COMMON_DEFINES})
+    target_include_directories(nrf-802154-sl PRIVATE
+        ${NRF54_SDK_INCLUDES}
+        ${PROJECT_SOURCE_DIR}/src/nrf54l15
+    )
+    target_link_libraries(nrf-802154-sl PRIVATE ot-config)
+endif()
 
 foreach(_nrf802154_iface
     nrf-802154-driver-interface
@@ -213,3 +241,7 @@ target_link_libraries(nordicsemi-nrf54l15-radio-driver
         nrf-802154-driver-interface
         nrf-802154-common-interface
 )
+
+if(NRF54_SPIKE_SL_BINARY)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/spike_c/CMakeLists.txt)
+endif()

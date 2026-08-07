@@ -38,9 +38,14 @@ set(NRF54_PLATFORM_SOURCES
     nrf_802154_irq_platform.c
     nrf_802154_temperature_platform.c
     nrf_802154_delayed_trx_stub.c
-    nrf_802154_sl_timer_baremetal.c
-    nrf_802154_rsch_baremetal.c
 )
+
+if(NOT NRF54_SPIKE_SL_BINARY)
+    list(APPEND NRF54_PLATFORM_SOURCES
+        nrf_802154_sl_timer_baremetal.c
+        nrf_802154_rsch_baremetal.c
+    )
+endif()
 
 if(NRF54_POC_MINIMAL_TIMERS)
     list(APPEND NRF54_PLATFORM_SOURCES nrf_802154_platform_sl_lptimer_stub.c)
