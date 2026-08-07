@@ -63,6 +63,7 @@ set(NRF54_RADIO_INCLUDES
     ${NRF54_802154_ROOT}/driver/include
     ${NRF54_802154_ROOT}/driver/src
     ${NRF54_802154_ROOT}/sl/include
+    ${NRF54_802154_ROOT}/sl/sl_opensource/include
     ${NRF54_802154_ROOT}/common/include
     ${PROJECT_SOURCE_DIR}/openthread/include
     ${PROJECT_SOURCE_DIR}/openthread/src
@@ -78,6 +79,7 @@ set(NRF54_FLAG
 set(NRF54_CHIP_DEFINES
     -DNRF54L15_XXAA
     -DNRF_APPLICATION
+    -DNRF_CONFIG_CPU_FREQ_MHZ=128
 )
 
 set(NRF54_COMMON_DEFINES
@@ -92,7 +94,9 @@ set(NRF54_COMMON_DEFINES
 add_subdirectory(platform)
 
 # Step 2: Nordic 802.15.4 driver via its own CMake.
-set(SL_OPENSOURCE ON CACHE BOOL "Use open-source 802.15.4 Service Layer" FORCE)
+option(SL_OPENSOURCE "Use open-source 802.15.4 Service Layer (variant D POC)" OFF)
+set(NRF54_SL_BINARY_PATH "${NRF54_802154_ROOT}/sl/sl/lib/nrf54l15_cpuapp/hard-float/libnrf-802154-sl.a"
+    CACHE FILEPATH "Path to libnrf-802154-sl.a (nrf54l15_cpuapp hard-float)")
 
 if(NOT NRF_802154_PROJECT_CONFIG)
     set(NRF_802154_PROJECT_CONFIG platform-config.h)
@@ -107,23 +111,12 @@ target_compile_options(nrf-802154-driver PRIVATE
     "SHELL:-include nordic_common_shim.h"
 )
 
-# Bare-metal sl_timer + rsch live in nrf-802154-platform; exclude Zephyr stubs from SL.
-if(TARGET nrf-802154-sl)
-    get_target_property(_nrf802154_sl_sources nrf-802154-sl SOURCES)
-    if(_nrf802154_sl_sources)
-        list(FILTER _nrf802154_sl_sources EXCLUDE REGEX "nrf_802154_sl_timer\\.c$")
-        list(FILTER _nrf802154_sl_sources EXCLUDE REGEX "nrf_802154_sl_rsch\\.c$")
-        set_target_properties(nrf-802154-sl PROPERTIES SOURCES "${_nrf802154_sl_sources}")
-    endif()
-endif()
-
 # Circular dependency between platform and sl (per Nordic docs).
 target_link_libraries(nrf-802154-platform PRIVATE nrf-802154-sl)
 
 # Propagate chip defines and include paths to Nordic targets.
 foreach(_nrf802154_lib
     nrf-802154-driver
-    nrf-802154-sl
     nrf-802154-common
     nrf-802154-platform
 )
@@ -134,10 +127,31 @@ foreach(_nrf802154_lib
     target_include_directories(${_nrf802154_lib}
         PRIVATE
             ${NRF54_SDK_INCLUDES}
+            ${NRF54_802154_ROOT}/sl/sl_opensource/include
             ${PROJECT_SOURCE_DIR}/src/nrf54l15
     )
     target_link_libraries(${_nrf802154_lib} PRIVATE ot-config)
 endforeach()
+
+if(SL_OPENSOURCE)
+    target_compile_definitions(nrf-802154-sl PRIVATE ${NRF54_COMMON_DEFINES})
+    target_include_directories(nrf-802154-sl
+        PRIVATE
+            ${NRF54_SDK_INCLUDES}
+            ${NRF54_802154_ROOT}/sl/sl_opensource/include
+            ${PROJECT_SOURCE_DIR}/src/nrf54l15
+    )
+    target_link_libraries(nrf-802154-sl PRIVATE ot-config)
+else()
+    target_compile_definitions(nrf-802154-sl INTERFACE ${NRF54_COMMON_DEFINES})
+    target_include_directories(nrf-802154-sl
+        INTERFACE
+            ${NRF54_SDK_INCLUDES}
+            ${NRF54_802154_ROOT}/sl/sl_opensource/include
+            ${PROJECT_SOURCE_DIR}/src/nrf54l15
+    )
+    target_link_libraries(nrf-802154-sl INTERFACE ot-config)
+endif()
 
 foreach(_nrf802154_iface
     nrf-802154-driver-interface
