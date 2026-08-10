@@ -26,7 +26,7 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 #
 
-# nRF54L — Nordic hal_nordic tree under nordic/, wired via Nordic nrf_802154 CMake.
+# nRF54L — hal_nordic (nrfx/MDK) + sdk-nrfxlib nrf_802154 (separate submodule).
 
 cmake_policy(SET CMP0079 NEW)
 
@@ -38,7 +38,7 @@ set(NRF54_MDK_ROOT ${NRF54_NRFX_ROOT}/bsp/stable/mdk)
 set(NRF54_SOC_ROOT ${NRF54_NRFX_ROOT}/bsp/stable/soc)
 set(NRF54_CONFIG_ROOT ${NRF54_ROOT}/config/nrf54l15)
 set(NRF54_CMSIS_ROOT ${NRF54_ROOT}/cmsis)
-set(NRF54_802154_ROOT ${NORDIC_ROOT}/drivers/nrf_802154)
+set(NRF54_802154_ROOT ${NRF54_ROOT}/nrfxlib/nrf_802154)
 
 # nrfx 3.x layout (hal_nordic) — different paths than nRF52 sdk/nrfx/
 set(NRF54_SDK_INCLUDES
@@ -90,19 +90,20 @@ set(NRF54_COMMON_DEFINES
     -D__STACK_SIZE=2048
 )
 
-# Step 1: platform lib (stub) — required before Nordic driver subdirectory.
-add_subdirectory(platform)
-
-# Step 2: Nordic 802.15.4 driver via its own CMake.
+# Step 1: platform lib — required before Nordic driver subdirectory.
 option(SL_OPENSOURCE "Use open-source 802.15.4 Service Layer (variant D POC)" OFF)
 set(NRF54_SL_BINARY_PATH "${NRF54_802154_ROOT}/sl/sl/lib/nrf54l15_cpuapp/hard-float/libnrf-802154-sl.a"
     CACHE FILEPATH "Path to libnrf-802154-sl.a (nrf54l15_cpuapp hard-float)")
+
+add_subdirectory(platform)
+
+# Step 2: Nordic 802.15.4 driver via its own CMake.
 
 if(NOT NRF_802154_PROJECT_CONFIG)
     set(NRF_802154_PROJECT_CONFIG platform-config.h)
 endif()
 
-add_subdirectory(${NRF54_802154_ROOT} nrf54_nrf_802154_build)
+include(${NRF54_ROOT}/cmake/nrf802154_driver.cmake)
 
 # nrf_802154_swi.c omits #include "nrf_802154_peripherals.h" (Nordic upstream gap).
 # Driver uses MAX()/MIN() — force-include shim (NCS/Zephyr provides nordic_common.h globally).
@@ -221,9 +222,42 @@ target_include_directories(nordicsemi-nrf54l15-radio-driver
 target_link_libraries(nordicsemi-nrf54l15-radio-driver
     INTERFACE
         nrf-802154-driver
-        nrf-802154-sl
         nrf-802154-common
         nrf-802154-platform
+        nrf-802154-sl
         nrf-802154-driver-interface
         nrf-802154-common-interface
 )
+
+# Variant C: MPSL replacement stubs — separate archive, whole-linked after SL .a
+# so mpsl_cx / RAAL / timestamper objects are not dropped by static link order.
+if(NOT SL_OPENSOURCE)
+    add_library(nrf54-variant-c-stubs STATIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/nrf_raal_single_phy.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/mpsl_cx_stub.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/nrf_802154_platform_timestamper_stub.c
+    )
+    target_include_directories(nrf54-variant-c-stubs
+        PRIVATE
+            ${NRF54_SDK_INCLUDES}
+            ${NRF54_802154_ROOT}/sl/include
+            ${NRF54_802154_ROOT}/sl/include/platform
+            ${NRF54_802154_ROOT}/common/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/platform
+            ${PROJECT_SOURCE_DIR}/src/nrf54l15
+    )
+    target_compile_definitions(nrf54-variant-c-stubs PRIVATE ${NRF54_COMMON_DEFINES})
+    target_link_libraries(nrf54-variant-c-stubs PRIVATE ot-config)
+
+    target_link_libraries(nordicsemi-nrf54l15-radio-driver
+        INTERFACE
+            -Wl,--whole-archive
+            nrf54-variant-c-stubs
+            -Wl,--no-whole-archive
+    )
+endif()
+
+# sym_* must be in the final executable (after SL .a scan), not in a static archive.
+if(NOT SL_OPENSOURCE AND TARGET ot-rcp)
+    target_sources(ot-rcp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/sym_stub.c)
+endif()

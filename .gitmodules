@@ -4,3 +4,6 @@
 [submodule "third_party/nrf54/nordic"]
 	path = third_party/nrf54/nordic
 	url = https://github.com/zephyrproject-rtos/hal_nordic
+[submodule "third_party/nrf54/nrfxlib"]
+	path = third_party/nrf54/nrfxlib
+	url = https://github.com/nrfconnect/sdk-nrfxlib
