@@ -6,7 +6,7 @@
  * from an archive scan.
  */
 
-void sym_AAFBZUDBSN44RWPA7VLGXWDL5UU6IQAP2VTRXLI(int license)
+void sym_AAFBZUDBSN44RWPA7VLGXWDL5UU6IQAP2VTRXLI(int enabled)
 {
-    (void)license;
+    (void)enabled;
 }

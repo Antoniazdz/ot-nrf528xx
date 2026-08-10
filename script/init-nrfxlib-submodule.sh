@@ -22,11 +22,11 @@ else
     git -C "${NRFXLIB_DIR}" sparse-checkout set nrf_802154
 fi
 
-SL_BIN="${NRFXLIB_DIR}/nrf_802154/sl/sl/lib/nrf54l15_cpuapp/hard-float/libnrf-802154-sl.a"
-if [[ ! -f "${SL_BIN}" ]]; then
-    echo "Brak binarki SL: ${SL_BIN}" >&2
-    exit 1
+PIN_COMMIT="$(sed -n '2p' "${VERSION_FILE}" | tr -d '[:space:]')"
+HEAD="$(git -C "${NRFXLIB_DIR}" rev-parse HEAD)"
+if [[ -n "${PIN_COMMIT}" && "${HEAD}" != "${PIN_COMMIT}" ]]; then
+    echo "WARN: nrfxlib HEAD $(git -C "${NRFXLIB_DIR}" rev-parse --short HEAD) != pin ${PIN_COMMIT:0:7}" >&2
+    echo "      Update third_party/nrf54/VERSION_NRF802154 or re-run after fixing the tag." >&2
 fi
 
-echo "OK: nrf_802154 @ $(git -C "${NRFXLIB_DIR}" rev-parse --short HEAD)"
-echo "SL binary: ${SL_BIN} ($(stat -c '%s' "${SL_BIN}") B)"
+exec "${REPO_ROOT}/script/verify-nrf802154-version.sh"

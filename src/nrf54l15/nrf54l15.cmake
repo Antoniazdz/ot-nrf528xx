@@ -54,9 +54,9 @@ list(APPEND OT_PUBLIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx"
     # TODO(nrf54): remove when alarm.c uses nrf_802154_platform_sl_lptimer (nRF54 SL API).
     "${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/drivers/radio/platform/lp_timer"
-    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/driver/src"
-    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/common/include"
-    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/drivers/nrf_802154/sl/include/platform"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nrfxlib/nrf_802154/driver/src"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nrfxlib/nrf_802154/common/include"
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/nrfxlib/nrf_802154/sl/include/platform"
 )
 
 set(OT_PLATFORM_DEFINES ${OT_PLATFORM_DEFINES} PARENT_SCOPE)

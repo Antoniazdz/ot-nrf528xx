@@ -58,9 +58,3 @@ int32_t mpsl_cx_register_callback(mpsl_cx_cb_t cb)
     m_callback = cb;
     return 0;
 }
-
-
-void sym_AAFBZUDBSN44RWPA7VLGXWDL5UU6IQAP2VTRXLI(bool enable)
-{
-    (void)enable;
-}
