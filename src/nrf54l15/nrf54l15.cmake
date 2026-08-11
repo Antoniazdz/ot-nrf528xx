@@ -28,6 +28,37 @@
 
 # Minimal RCP build: single-phy radio, UART transport, no SoftDevice/bootloader.
 
+set(NRF_PLATFORM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/nrf54l15)
+
+set(NRF_COMM_SOURCES
+    ${NRF_PLATFORM_DIR}/alarm_nrf54.c
+    ${NRF_PLATFORM_DIR}/crypto_nrf54.c
+    ${NRF_PLATFORM_DIR}/diag.c
+    ${NRF_PLATFORM_DIR}/entropy_nrf54.c
+    ${NRF_PLATFORM_DIR}/fem_nrf54.c
+    ${NRF_PLATFORM_DIR}/logging.c
+    ${NRF_PLATFORM_DIR}/misc_nrf54.c
+    ${NRF_PLATFORM_DIR}/radio_nrf54.c
+    ${NRF_PLATFORM_DIR}/system_nrf54.c
+    ${NRF_PLATFORM_DIR}/temp_nrf54.c
+)
+
+set(NRF_TRANSPORT_SOURCES
+    ${NRF_PLATFORM_DIR}/transport/transport.c
+    ${NRF_PLATFORM_DIR}/uart_nrf54.c
+)
+
+set(NRF54L15_3RD_LIBS
+    nordicsemi-nrf54l15-radio-driver
+    nordicsemi-nrf54l15-sdk
+    jlinkrtt
+)
+
+set(NRF_INCLUDES
+    ${NRF_PLATFORM_DIR}
+    ${PROJECT_SOURCE_DIR}/openthread/examples/platforms
+)
+
 set(NRF54_MDK_LINKER_DIR "${PROJECT_SOURCE_DIR}/third_party/nrf54/mdk")
 set(LD_FILE "${NRF54_MDK_LINKER_DIR}/nrf54l/nrf54l15/nrf54l15_xxaa_application.ld")
 set(LD_COMMON_DIR "${NRF54_MDK_LINKER_DIR}/common")
@@ -41,10 +72,6 @@ set(COMM_FLAGS
     -Wno-expansion-to-defined
 )
 
-list(APPEND OT_PLATFORM_DEFINES
-    "OPENTHREAD_CORE_CONFIG_PLATFORM_CHECK_FILE=\"openthread-core-nrf54l15-config-check.h\""
-)
-
 list(APPEND OT_PUBLIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/cmsis"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/config/nrf54l15"
@@ -52,8 +79,6 @@ list(APPEND OT_PUBLIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/templates"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx"
-    # TODO(nrf54): remove when alarm.c uses nrf_802154_platform_sl_lptimer (nRF54 SL API).
-    "${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/drivers/radio/platform/lp_timer"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nrfxlib/nrf_802154/driver/src"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nrfxlib/nrf_802154/common/include"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nrfxlib/nrf_802154/sl/include/platform"
@@ -75,7 +100,6 @@ add_definitions(-DUART_BAUDRATE=NRF_UARTE_BAUDRATE_${OT_UART_BAUDRATE})
 
 add_library(openthread-nrf54l15
     ${NRF_COMM_SOURCES}
-    ${NRF_SINGLEPHY_SOURCES}
     $<TARGET_OBJECTS:openthread-platform-utils>
 )
 
@@ -85,7 +109,6 @@ add_library(openthread-nrf54l15-transport
 
 add_library(openthread-nrf54l15-sdk
     ${NRF_COMM_SOURCES}
-    ${NRF_SINGLEPHY_SOURCES}
     $<TARGET_OBJECTS:openthread-platform-utils>
 )
 
@@ -168,21 +191,18 @@ target_compile_options(openthread-nrf54l15-sdk
 
 target_include_directories(openthread-nrf54l15
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/nrf54l15
         ${NRF_INCLUDES}
         ${OT_PUBLIC_INCLUDES}
 )
 
 target_include_directories(openthread-nrf54l15-transport
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/nrf54l15
         ${NRF_INCLUDES}
         ${OT_PUBLIC_INCLUDES}
 )
 
 target_include_directories(openthread-nrf54l15-sdk
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/nrf54l15
         ${NRF_INCLUDES}
         ${OT_PUBLIC_INCLUDES}
 )

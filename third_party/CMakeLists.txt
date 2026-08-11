@@ -28,8 +28,4 @@
 
 add_subdirectory(jlink)
 
-if(NRF_PLATFORM STREQUAL "nrf54l15")
-    add_subdirectory(nrf54)
-else()
-    add_subdirectory(NordicSemiconductor)
-endif()
+add_subdirectory(nrf54)

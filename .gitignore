@@ -46,3 +46,7 @@ __pycache__
 # Images
 *.hex
 *.zip
+
+# Local notes, debug logs, session handoffs (not part of the build)
+tmp/
+docs/

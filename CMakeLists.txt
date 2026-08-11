@@ -27,14 +27,10 @@
 #
 
 cmake_minimum_required(VERSION 3.10.2)
-project(ot-nrf528xx VERSION 0.2.0)
+project(ot-nrf54l15 VERSION 0.2.0)
 
-set(NRF_PLATFORM_VALUES
-    "nrf52811"
-    "nrf52833"
-    "nrf52840"
-    "nrf54l15"
-)
+set(NRF_PLATFORM_VALUES nrf54l15)
+set(NRF_PLATFORM nrf54l15 CACHE STRING "Nordic nRF platform")
 set_property(CACHE NRF_PLATFORM PROPERTY STRINGS ${NRF_PLATFORM_VALUES})
 if(NOT NRF_PLATFORM IN_LIST NRF_PLATFORM_VALUES)
     message(FATAL_ERROR "Please select a supported platform: ${NRF_PLATFORM_VALUES}")

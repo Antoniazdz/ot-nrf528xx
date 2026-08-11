@@ -26,28 +26,13 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 #
 
+# SEGGER RTT — OpenThread platform logging (utils/logging_rtt), debug via J-Link.
+
 string(REPLACE "-Wundef" "" OT_CFLAGS "${OT_CFLAGS}")
+
 add_library(jlinkrtt
     SEGGER_RTT_V640/RTT/SEGGER_RTT.c
 )
-
-if(NRF_PLATFORM STREQUAL "nrf54l15")
-    target_compile_options(jlinkrtt PRIVATE
-        -DNRF54L15_XXAA
-    )
-elseif(OT_PLATFORM STREQUAL "nrf52811")
-    target_compile_options(jlinkrtt PRIVATE
-        -DNRF52811_XXAA
-    )
-elseif(OT_PLATFORM STREQUAL "nrf52833")
-    target_compile_options(jlinkrtt PRIVATE
-        -DNRF52833_XXAA
-    )
-else()
-    target_compile_options(jlinkrtt PRIVATE
-        -DNRF52840_XXAA
-    )
-endif()
 
 option(RTT_BUFFER_SIZE "sets the RTT up buffer size")
 if(RTT_BUFFER_SIZE)
@@ -56,29 +41,6 @@ if(RTT_BUFFER_SIZE)
     )
 endif()
 
-if(NRF_PLATFORM STREQUAL "nrf54l15")
-    # Vanilla SEGGER_RTT_Conf.h from SEGGER_RTT_V640/RTT/ (no Nordic SDK wrapper).
-    target_include_directories(jlinkrtt PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/SEGGER_RTT_V640/RTT
-    )
-else()
-    target_compile_options(jlinkrtt PRIVATE
-        -DSEGGER_RTT_CONFIG_H=\"${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/segger_rtt/SEGGER_RTT_Conf.h\"
-        -DUSE_APP_CONFIG=1
-    )
-endif()
-
 target_include_directories(jlinkrtt PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/SEGGER_RTT_V640/RTT
 )
-
-if(NOT NRF_PLATFORM STREQUAL "nrf54l15")
-    target_include_directories(jlinkrtt PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/cmsis
-        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/config
-        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/config/${NRF_PLATFORM}/config
-        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/dependencies
-        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/libraries/app_error
-        ${PROJECT_SOURCE_DIR}/third_party/NordicSemiconductor/nrfx/mdk
-    )
-endif()

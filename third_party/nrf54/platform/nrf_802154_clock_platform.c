@@ -202,7 +202,7 @@ bool nrf_802154_clock_hfclk_is_running(void)
 }
 
 void nrf_802154_clock_lfclk_start(void)
-{
+{   if (mLfclkUsers == UINT8_MAX) { return; }
     if (mLfclkUsers++ == 0)
     {
         if (nrfx_clock_lfclk_running_check(NULL))
