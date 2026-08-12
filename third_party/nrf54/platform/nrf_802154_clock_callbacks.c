@@ -14,5 +14,5 @@
 
 void nrf_802154_clock_lfclk_ready(void)
 {
-    /* POC: minimal lptimer stub does not block on LFCLK ramp-up. */
+    /* intentionally empty */
 }

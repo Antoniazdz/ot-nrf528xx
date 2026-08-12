@@ -214,6 +214,10 @@ void nrf_802154_clock_lfclk_start(void)
             nrfx_clock_lfclk_start();
         }
     }
+    else if (nrfx_clock_lfclk_running_check(NULL))
+    {
+        nrf_802154_clock_lfclk_ready();
+    }
 }
 
 void nrf_802154_clock_lfclk_stop(void)
