@@ -26,7 +26,6 @@ set(NRF54_PLATFORM_SOURCES
     nrf_802154_clock_callbacks.c
     nrf_802154_irq_platform.c
     nrf_802154_temperature_platform.c
-    nrf_802154_delayed_trx_stub.c
     nrf_802154_platform_sl_lptimer.c
     nrf_802154_platform_sl_lptimer_grtc_hw_task.c
 )
