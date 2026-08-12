@@ -222,15 +222,18 @@
  /* Platform API                                                                 */
  /* -------------------------------------------------------------------------- */
  
- void nrf_802154_platform_sl_lp_timer_init(void)
- {
-     m_critical_section_cnt = 0;
- 
- #if !NRF54_LPTIMER_CC2_STUB_BISECT
-     m_compare_int_was_enabled = false;
-     m_enabled                 = false;
- 
-    assert(nrfx_grtc_channel_alloc(&m_callbacks_channel) == 0);
+void nrf_802154_platform_sl_lp_timer_init(void)
+{
+    int err;
+
+    m_critical_section_cnt = 0;
+
+#if !NRF54_LPTIMER_CC2_STUB_BISECT
+    m_compare_int_was_enabled = false;
+    m_enabled                 = false;
+
+    err = nrfx_grtc_channel_alloc(&m_callbacks_channel);
+     assert(err == 0);
     /* nrfx_grtc_channel_alloc() returns any free channel; use m_callbacks_channel. */
 
     m_callbacks_channel_data.channel   = m_callbacks_channel;
@@ -240,15 +243,17 @@
  
  #if !NRF54_LPTIMER_CC2_ONLY_BISECT
      m_hw_task_state = HW_TASK_STATE_IDLE;
- 
-    assert(nrfx_grtc_channel_alloc(&m_hw_task_channel) == 0);
+    
+     err = nrfx_grtc_channel_alloc(&m_hw_task_channel);
+    assert(err == 0);
     /* Same for hw_task: event address and DPPI wiring use m_hw_task_channel. */
 
     m_hw_task_channel_data.channel   = m_hw_task_channel;
      m_hw_task_channel_data.handler   = NULL;
      m_hw_task_channel_data.p_context = NULL;
  
-     assert(nrf_802154_platform_sl_lptimer_hw_task_cross_domain_connections_setup(m_hw_task_channel) == 0);
+    err = nrf_802154_platform_sl_lptimer_hw_task_cross_domain_connections_setup(m_hw_task_channel);
+    assert(err == 0);
  #endif
  
      assert(nrfx_grtc_init_check());
