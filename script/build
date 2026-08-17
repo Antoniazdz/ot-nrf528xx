@@ -32,7 +32,7 @@ set -euxo pipefail
 NRF_PLATFORM=nrf54l15
 NRF_BUILD_TYPE=UART_trans
 OT_CMAKE_BUILD_DIR=build-nrf54l15-uart
-OT_CMAKE_NINJA_TARGET=(ot-rcp)
+OT_CMAKE_NINJA_TARGET=(ot-rcp ot-cli-ftd)
 
 OT_SRCDIR="$(pwd)"
 readonly OT_SRCDIR

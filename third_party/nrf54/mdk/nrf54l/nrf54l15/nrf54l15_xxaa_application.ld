@@ -12,3 +12,16 @@ MEMORY
 
 
 INCLUDE "nrf_common.ld"
+
+/* OpenThread settings: 4 x 4 KiB pages (two 8 KiB swap blocks). */
+__ot_flash_data_size = 0x4000;
+
+SECTIONS
+{
+  .ot_flash_data ORIGIN(FLASH) + LENGTH(FLASH) - __ot_flash_data_size (NOLOAD) :
+  {
+    __start_ot_flash_data = .;
+    . = . + __ot_flash_data_size;
+    __stop_ot_flash_data = .;
+  } > FLASH
+}

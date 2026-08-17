@@ -36,6 +36,8 @@ set(NRF_COMM_SOURCES
     ${NRF_PLATFORM_DIR}/diag.c
     ${NRF_PLATFORM_DIR}/entropy_nrf54.c
     ${NRF_PLATFORM_DIR}/fem_nrf54.c
+    ${NRF_PLATFORM_DIR}/flash.c
+    ${NRF_PLATFORM_DIR}/flash_nosd.c
     ${NRF_PLATFORM_DIR}/logging.c
     ${NRF_PLATFORM_DIR}/misc_nrf54.c
     ${NRF_PLATFORM_DIR}/radio_nrf54.c
@@ -174,6 +176,7 @@ target_compile_options(openthread-nrf54l15
         ${OT_CFLAGS}
         ${COMM_FLAGS}
         -DRAAL_SINGLE_PHY=1
+        -DPLATFORM_OPENTHREAD_VANILLA
 )
 
 target_compile_options(openthread-nrf54l15-transport
@@ -187,6 +190,7 @@ target_compile_options(openthread-nrf54l15-sdk
         ${OT_CFLAGS}
         ${COMM_FLAGS}
         -DRAAL_SINGLE_PHY=1
+        -DPLATFORM_OPENTHREAD_VANILLA
 )
 
 target_include_directories(openthread-nrf54l15
