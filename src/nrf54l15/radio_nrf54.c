@@ -125,6 +125,8 @@ static int8_t   sEnergyDetected;
 static uint32_t      sCslPeriod;
 static uint32_t      sCslSampleTime;
 static const uint8_t sCslIeHeader[OT_IE_HEADER_SIZE] = {CSL_IE_HEADER_BYTES_LO, CSL_IE_HEADER_BYTES_HI};
+
+static uint16_t getCslPhase(void);
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 
 typedef enum
@@ -1345,7 +1347,7 @@ void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
 }
 
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-static uint16_t getCslPhase()
+static uint16_t getCslPhase(void)
 {
     uint32_t curTime       = otPlatAlarmMicroGetNow();
     uint32_t cslPeriodInUs = sCslPeriod * OT_US_PER_TEN_SYMBOLS;

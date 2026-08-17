@@ -140,6 +140,18 @@ void nrf5CryptoInit(void);
 void nrf5CryptoDeinit(void);
 
 /**
+ * Initialization of flash driver.
+ *
+ */
+void nrf5FlashInit(void);
+
+/**
+ * Function for erasing a flash region (swap area).
+ *
+ */
+otError nrf5FlashSwapErase(uint32_t aAddress, uint32_t aSize);
+
+/**
  * Function for erasing page in flash.
  *
  */

@@ -180,6 +180,7 @@ set(NRF54_SDK_SOURCES
     ${NRF54_NRFX_ROOT}/drivers/src/nrfx_clock_lfclk.c
     ${NRF54_NRFX_ROOT}/drivers/src/nrfx_clock_xo.c
     ${NRF54_NRFX_ROOT}/drivers/src/nrfx_grtc.c
+    ${NRF54_NRFX_ROOT}/drivers/src/nrfx_rramc.c
     ${NRF54_NRFX_ROOT}/helpers/nrfx_flag32_allocator.c
     ${NRF54_NRFX_ROOT}/helpers/nrfx_gppi_dppi.c
     ${NRF54_NRFX_ROOT}/helpers/nrfx_gppi_ppi.c
@@ -235,7 +236,7 @@ if(NOT SL_OPENSOURCE)
     add_library(nrf54-variant-c-stubs STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/platform/nrf_raal_single_phy.c
         ${CMAKE_CURRENT_SOURCE_DIR}/platform/mpsl_cx_stub.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/platform/nrf_802154_platform_timestamper_stub.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/nrf_802154_platform_timestamper.c
     )
     target_include_directories(nrf54-variant-c-stubs
         PRIVATE
@@ -258,6 +259,11 @@ if(NOT SL_OPENSOURCE)
 endif()
 
 # sym_* must be in the final executable (after SL .a scan), not in a static archive.
-if(NOT SL_OPENSOURCE AND TARGET ot-rcp)
-    target_sources(ot-rcp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/sym_stub.c)
+if(NOT SL_OPENSOURCE)
+    set(NRF54_SL_SYM_STUB_TARGETS ot-rcp ot-cli-ftd ot-cli-mtd ot-ncp-ftd ot-ncp-mtd)
+    foreach(_sym_target IN LISTS NRF54_SL_SYM_STUB_TARGETS)
+        if(TARGET ${_sym_target})
+            target_sources(${_sym_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/sym_stub.c)
+        endif()
+    endforeach()
 endif()
