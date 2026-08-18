@@ -123,6 +123,7 @@
  
      if (!is_lptimer_enabled())
      {
+         g_nrf54_debug_stats.cc2_handler_skip_disabled++;
          return;
      }
  
@@ -131,6 +132,7 @@
      // #endregion
  
      curr_ticks = nrfx_grtc_syscounter_get();
+     g_nrf54_debug_stats.sl_timer_handler_enter++;
      nrf_802154_sl_timer_handler(curr_ticks);
  }
  
@@ -183,9 +185,28 @@
  static uint8_t                  m_hw_task_channel;
  static nrfx_grtc_channel_t      m_hw_task_channel_data;
  
+ typedef enum
+ {
+     HW_TASK_ABORT_PREPARE = 0,
+     HW_TASK_ABORT_CLEANUP,
+     HW_TASK_ABORT_DEINIT,
+ } hw_task_abort_reason_t;
+ 
+ static void hw_task_stats_snap_state(void)
+ {
+     g_nrf54_debug_stats.last_hw_task_state = m_hw_task_state;
+ }
+ 
  static bool hw_task_state_set(hw_task_state_t aExpectedState, hw_task_state_t aNewState)
  {
-     return nrf_802154_sl_atomic_cas_u8((uint8_t *)&m_hw_task_state, &aExpectedState, aNewState);
+     bool ok = nrf_802154_sl_atomic_cas_u8((uint8_t *)&m_hw_task_state, &aExpectedState, aNewState);
+ 
+     if (ok)
+     {
+         hw_task_stats_snap_state();
+     }
+ 
+     return ok;
  }
  
  static void hw_task_schedule(uint64_t aFireLpticks)
@@ -200,9 +221,25 @@
      nrfy_grtc_sys_counter_compare_event_enable(NRF_GRTC, m_hw_task_channel);
  }
  
- static void hw_task_abort(void)
+ static void hw_task_abort(hw_task_abort_reason_t aReason)
  {
      bool irq_key;
+ 
+     g_nrf54_debug_stats.hw_task_abort_enter++;
+     switch (aReason)
+     {
+     case HW_TASK_ABORT_PREPARE:
+         g_nrf54_debug_stats.hw_task_abort_from_prepare++;
+         break;
+     case HW_TASK_ABORT_CLEANUP:
+         g_nrf54_debug_stats.hw_task_abort_from_cleanup++;
+         break;
+     case HW_TASK_ABORT_DEINIT:
+         g_nrf54_debug_stats.hw_task_abort_from_deinit++;
+         break;
+     default:
+         break;
+     }
  
      irq_key = compare_int_lock(m_hw_task_channel);
      (void)nrfx_grtc_syscounter_cc_disable(m_hw_task_channel);
@@ -243,6 +280,7 @@ void nrf_802154_platform_sl_lp_timer_init(void)
  
  #if !NRF54_LPTIMER_CC2_ONLY_BISECT
      m_hw_task_state = HW_TASK_STATE_IDLE;
+     hw_task_stats_snap_state();
     
      err = nrfx_grtc_channel_alloc(&m_hw_task_channel);
     assert(err == 0);
@@ -268,7 +306,7 @@ void nrf_802154_platform_sl_lp_timer_init(void)
      }
  
      nrf_802154_platform_sl_lptimer_hw_task_cross_domain_connections_clear();
-     hw_task_abort();
+     hw_task_abort(HW_TASK_ABORT_DEINIT);
      (void)nrfx_grtc_channel_free(m_hw_task_channel);
  #endif
  
@@ -314,6 +352,7 @@ void nrf_802154_platform_sl_lp_timer_init(void)
  #if NRF54_LPTIMER_CC2_STUB_BISECT
      (void)fire_lpticks;
  #else
+     g_nrf54_debug_stats.lptimer_schedule_at_enter++;
      m_enabled = true;
      compare_schedule(m_callbacks_channel, &m_callbacks_channel_data, fire_lpticks);
  #endif
@@ -322,6 +361,13 @@ void nrf_802154_platform_sl_lp_timer_init(void)
  void nrf_802154_platform_sl_lptimer_disable(void)
  {
  #if !NRF54_LPTIMER_CC2_STUB_BISECT
+     g_nrf54_debug_stats.lptimer_disable_enter++;
+ #if !NRF54_LPTIMER_CC2_ONLY_BISECT
+     if (m_hw_task_state == HW_TASK_STATE_READY)
+     {
+         g_nrf54_debug_stats.lptimer_disable_while_hw_ready++;
+     }
+ #endif
      m_enabled = false;
      compare_channel_disarm(m_callbacks_channel);
  #endif
@@ -437,8 +483,16 @@ void nrf_802154_platform_sl_lp_timer_init(void)
      bool                               done_on_time = true;
      nrf_802154_sl_mcu_critical_state_t mcu_cs_state;
  
+     g_nrf54_debug_stats.hw_task_prepare_enter++;
+     g_nrf54_debug_stats.last_hw_task_ppi           = ppi_channel;
+     g_nrf54_debug_stats.last_hw_task_fire_lpticks    = (uint32_t)fire_lpticks;
+     g_nrf54_debug_stats.last_hw_task_grtc_at_prepare = (uint32_t)nrfx_grtc_syscounter_get();
+     hw_task_stats_snap_state();
+ 
      if (!hw_task_state_set(HW_TASK_STATE_IDLE, HW_TASK_STATE_SETTING_UP))
      {
+         g_nrf54_debug_stats.hw_task_prepare_no_resources++;
+         g_nrf54_debug_stats.last_hw_task_state_at_no_resources = m_hw_task_state;
          return NRF_802154_SL_LPTIMER_PLATFORM_NO_RESOURCES;
      }
  
@@ -454,7 +508,7 @@ void nrf_802154_platform_sl_lp_timer_init(void)
      if (syscnt_now + HW_TASK_MINIMUM_MARGIN_LPTICKS >= fire_lpticks)
      {
          nrf_802154_platform_sl_lptimer_hw_task_local_domain_connections_clear();
-         hw_task_abort();
+         hw_task_abort(HW_TASK_ABORT_PREPARE);
          done_on_time = false;
      }
  
@@ -462,7 +516,6 @@ void nrf_802154_platform_sl_lp_timer_init(void)
  
      (void)hw_task_state_set(HW_TASK_STATE_SETTING_UP, done_on_time ? HW_TASK_STATE_READY : HW_TASK_STATE_IDLE);
  
-     // #region agent log
      if (done_on_time)
      {
          g_nrf54_debug_stats.hw_task_prepare_ok++;
@@ -471,22 +524,31 @@ void nrf_802154_platform_sl_lp_timer_init(void)
      {
          g_nrf54_debug_stats.hw_task_prepare_fail++;
      }
-     // #endregion
  
      return done_on_time ? NRF_802154_SL_LPTIMER_PLATFORM_SUCCESS : NRF_802154_SL_LPTIMER_PLATFORM_TOO_LATE;
  }
  
  nrf_802154_sl_lptimer_platform_result_t nrf_802154_platform_sl_lptimer_hw_task_cleanup(void)
  {
+     g_nrf54_debug_stats.hw_task_cleanup_enter++;
+     g_nrf54_debug_stats.last_hw_task_grtc_at_cleanup = (uint32_t)nrfx_grtc_syscounter_get();
+     g_nrf54_debug_stats.last_hw_task_cc_evt_at_cleanup =
+         hw_task_compare_evt_check() ? 1U : 0U;
+     hw_task_stats_snap_state();
+ 
      if (!hw_task_state_set(HW_TASK_STATE_READY, HW_TASK_STATE_CLEANING))
      {
+         g_nrf54_debug_stats.hw_task_cleanup_wrong_state++;
+         g_nrf54_debug_stats.last_hw_task_state_at_cleanup_fail = m_hw_task_state;
          return NRF_802154_SL_LPTIMER_PLATFORM_WRONG_STATE;
      }
  
      nrf_802154_platform_sl_lptimer_hw_task_local_domain_connections_clear();
-     hw_task_abort();
+     hw_task_abort(HW_TASK_ABORT_CLEANUP);
  
      (void)hw_task_state_set(HW_TASK_STATE_CLEANING, HW_TASK_STATE_IDLE);
+ 
+     g_nrf54_debug_stats.hw_task_cleanup_ok++;
  
      return NRF_802154_SL_LPTIMER_PLATFORM_SUCCESS;
  }
@@ -495,8 +557,13 @@ void nrf_802154_platform_sl_lp_timer_init(void)
  {
      bool cc_triggered;
  
+     g_nrf54_debug_stats.hw_task_update_ppi_enter++;
+     g_nrf54_debug_stats.last_hw_task_ppi = ppi_channel;
+     hw_task_stats_snap_state();
+ 
      if (!hw_task_state_set(HW_TASK_STATE_READY, HW_TASK_STATE_UPDATING))
      {
+         g_nrf54_debug_stats.hw_task_update_ppi_wrong_state++;
          return NRF_802154_SL_LPTIMER_PLATFORM_WRONG_STATE;
      }
  
@@ -510,7 +577,14 @@ void nrf_802154_platform_sl_lp_timer_init(void)
  
      (void)hw_task_state_set(HW_TASK_STATE_UPDATING, HW_TASK_STATE_READY);
  
-     return cc_triggered ? NRF_802154_SL_LPTIMER_PLATFORM_TOO_LATE : NRF_802154_SL_LPTIMER_PLATFORM_SUCCESS;
+     if (cc_triggered)
+     {
+         g_nrf54_debug_stats.hw_task_update_ppi_too_late++;
+         return NRF_802154_SL_LPTIMER_PLATFORM_TOO_LATE;
+     }
+ 
+     g_nrf54_debug_stats.hw_task_update_ppi_ok++;
+     return NRF_802154_SL_LPTIMER_PLATFORM_SUCCESS;
  }
  
  #endif // NRF54_LPTIMER_CC2_ONLY_BISECT

@@ -63,6 +63,7 @@
 #include <nrf.h>
 #include <nrf_802154.h>
 #include <nrf_802154_pib.h>
+#include "nrf_802154_common_utils.h"
 #include "nrf_802154_core.h"
 #include "platform/nrf_802154_clock.h"
 
@@ -78,7 +79,7 @@
 #define US_PER_MS             1000ULL      ///< Microseconds in millisecond.
 
 #define RSSI_SETTLE_TIME_US   40           ///< RSSI settle time in microseconds.
-#define SAFE_DELTA            1000         ///< A safe value for the `dt` parameter of delayed operations.
+#define DRX_SLOT_RX           0            ///< Delayed reception window ID for CSL.
 
 #define CSL_UNCERT            20           ///< The Uncertainty of the scheduling CSL of transmission by the parent, in ±10 us units.
 
@@ -205,14 +206,14 @@ static int8_t GetTransmitPowerForChannel(uint8_t aChannel)
 
 static uint64_t GetRxTimestamp(uint64_t aTime, uint8_t aLength)
 {
-    OT_UNUSED_VARIABLE(aLength);
-
     if (aTime == NRF_802154_NO_TIMESTAMP)
     {
-        return nrf5AlarmGetCurrentTime();
+        g_nrf54_debug_stats.rx_no_timestamp++;
+        return 0;
     }
 
-    return aTime;
+    g_nrf54_debug_stats.rx_timestamp_ok++;
+    return nrf_802154_timestamp_end_to_phr_convert(aTime, aLength);
 }
 
 static void dataInit(void)
@@ -658,15 +659,47 @@ otError otPlatRadioReceive(otInstance *aInstance, uint8_t aChannel)
 }
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+static uint64_t unwrapFutureRadioTimeUs(uint32_t aTimeUs)
+{
+    uint64_t nowUs = otPlatTimeGet();
+    uint32_t nowLo = (uint32_t)nowUs;
+    uint64_t rxTime = (nowUs & ~(uint64_t)UINT32_MAX) | aTimeUs;
+
+    if (nowLo > aTimeUs)
+    {
+        rxTime += (uint64_t)UINT32_MAX + 1U;
+    }
+
+    return rxTime;
+}
+
 otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t aStart, uint32_t aDuration)
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    bool result;
+    bool     result;
+    uint64_t rxTime = unwrapFutureRadioTimeUs(aStart);
+
+    g_nrf54_debug_stats.csl_receive_at_enter++;
+    g_nrf54_debug_stats.last_csl_channel              = aChannel;
+    g_nrf54_debug_stats.last_csl_win_start            = aStart;
+    g_nrf54_debug_stats.last_csl_win_duration         = aDuration;
+    g_nrf54_debug_stats.last_csl_receive_at_arg_start = (uint32_t)rxTime;
+    g_nrf54_debug_stats.last_grtc_at_csl_receive_at   = (uint32_t)otPlatTimeGet();
 
     nrf_802154_tx_power_set(GetTransmitPowerForChannel(aChannel));
-    result = nrf_802154_receive_at(aStart - SAFE_DELTA, SAFE_DELTA, aDuration, aChannel);
+    (void)nrf_802154_receive_at_scheduled_cancel(DRX_SLOT_RX);
+    result = nrf_802154_receive_at(rxTime, aDuration, aChannel, DRX_SLOT_RX);
     clearPendingEvents();
+
+    if (result)
+    {
+        g_nrf54_debug_stats.csl_receive_at_ok++;
+    }
+    else
+    {
+        g_nrf54_debug_stats.csl_receive_at_fail++;
+    }
 
     return result ? OT_ERROR_NONE : OT_ERROR_FAILED;
 }
@@ -889,7 +922,15 @@ otRadioCaps otPlatRadioGetCaps(otInstance *aInstance)
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
                          OT_RADIO_CAPS_TRANSMIT_SEC | OT_RADIO_CAPS_TRANSMIT_TIMING | OT_RADIO_CAPS_RECEIVE_TIMING |
 #endif
-                         OT_RADIO_CAPS_SLEEP_TO_TX);
+                         OT_RADIO_CAPS_RX_ON_WHEN_IDLE | OT_RADIO_CAPS_SLEEP_TO_TX);
+}
+
+void otPlatRadioSetRxOnWhenIdle(otInstance *aInstance, bool aEnable)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+
+    /* Test A: PIB only — no sleep_if_idle here (aggressive sleep kills lptimer/DRX). */
+    nrf_802154_pib_rx_on_when_idle_set(aEnable);
 }
 
 bool otPlatRadioGetPromiscuous(otInstance *aInstance)
@@ -1299,7 +1340,24 @@ void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lq
 
 void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
 {
-    OT_UNUSED_VARIABLE(id);
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+    if (id == DRX_SLOT_RX && error == NRF_802154_RX_ERROR_DELAYED_TIMEOUT)
+    {
+        if (!nrf_802154_pib_rx_on_when_idle_get())
+        {
+            return;
+        }
+
+        sAckedWithFramePending = false;
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+        sAckedWithSecEnhAck = false;
+#endif
+        sReceiveError = OT_ERROR_NONE;
+        setPendingEvent(kPendingEventSleep);
+        return;
+    }
+#endif
+
     switch (error)
     {
     case NRF_802154_RX_ERROR_INVALID_FRAME:

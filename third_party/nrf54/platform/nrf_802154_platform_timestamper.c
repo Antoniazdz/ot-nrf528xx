@@ -27,7 +27,15 @@ static bool               m_cross_domain_connected;
 
 static void grtc_capture_prepare(uint8_t cc_channel)
 {
-    nrf_grtc_sys_counter_compare_event_enable(NRF_GRTC, cc_channel);
+    nrfx_grtc_channel_t ch = {
+        .channel   = cc_channel,
+        .handler   = NULL,
+        .p_context = NULL,
+    };
+    const uint64_t counter_span =
+        (uint64_t)NRF_GRTC_SYSCOUNTERL_VALUE_MASK |
+        ((uint64_t)NRF_GRTC_SYSCOUNTERH_VALUE_MASK << 32);
+    (void)nrfx_grtc_syscounter_cc_absolute_set(&ch, counter_span, false);
 }
 
 
@@ -78,10 +86,16 @@ void nrf_802154_platform_timestamper_cross_domain_connections_setup(void)
 
 void nrf_802154_platform_timestamper_cross_domain_connections_clear(void)
 {
+   if (!m_cross_domain_connected)
+    {
+        return;
+    }
     nrf_grtc_task_t capture_task =
         nrfy_grtc_sys_counter_capture_task_get(m_timestamp_cc_channel);
-
     NRF_DPPI_ENDPOINT_CLEAR(nrfy_grtc_task_address_get(NRF_GRTC, capture_task));
+    nrfx_gppi_conn_disable(m_rad_peri_handle);
+    nrfx_gppi_domain_conn_free(m_rad_peri_handle);
+    m_cross_domain_connected = false;
 }
 
 void nrf_802154_platform_timestamper_local_domain_connections_setup(uint32_t dppi_ch)
@@ -93,6 +107,11 @@ void nrf_802154_platform_timestamper_local_domain_connections_setup(uint32_t dpp
 void nrf_802154_platform_timestamper_local_domain_connections_clear(uint32_t dppi_ch)
 {
     (void)dppi_ch;
+    if (!m_cross_domain_connected)
+    {
+        return;
+    }
+    nrf_ppib_subscribe_clear(NRF_PPIB11, nrf_ppib_send_task_get(m_ppib_chan));
 }
 
 bool nrf_802154_platform_timestamper_captured_timestamp_read(uint64_t * p_captured)
