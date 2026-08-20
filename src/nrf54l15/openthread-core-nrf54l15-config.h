@@ -93,12 +93,18 @@
 #define OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AHEAD 104
 #endif
 
+/* CSL-P0-LT: extra margin for main-loop latency before RSCH schedule (~320 default
+ * gives ~253 µs effective lead; 512 → ~445 µs platform / ~255 µs trigger warm). */
+#ifndef OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD
+#define OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD 512
+#endif
+
 #ifndef OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER
 #define OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER 0
 #endif
 
 #ifndef OPENTHREAD_CONFIG_MAC_CSL_DEBUG_ENABLE
-#define OPENTHREAD_CONFIG_MAC_CSL_DEBUG_ENABLE 0
+#define OPENTHREAD_CONFIG_MAC_CSL_DEBUG_ENABLE 1
 #endif
 
 /**
