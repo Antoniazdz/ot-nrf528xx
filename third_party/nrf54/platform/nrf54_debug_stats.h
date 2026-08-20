@@ -19,8 +19,37 @@ typedef struct
     uint32_t cc0_timer_fires;
     uint32_t cc1_timer_fires;
     uint32_t cc3_timer_fires;
+    /* CC8 hw_task — arm/disarm (CSL receive_at delayed trigger). */
+    uint32_t hw_task_prepare_enter;
+    uint32_t hw_task_prepare_no_resources;
     uint32_t hw_task_prepare_ok;
     uint32_t hw_task_prepare_fail;
+    uint32_t hw_task_cleanup_enter;
+    uint32_t hw_task_cleanup_ok;
+    uint32_t hw_task_cleanup_wrong_state;
+    uint32_t hw_task_update_ppi_enter;
+    uint32_t hw_task_update_ppi_ok;
+    uint32_t hw_task_update_ppi_wrong_state;
+    uint32_t hw_task_update_ppi_too_late;
+    uint32_t hw_task_abort_enter;
+    uint32_t hw_task_abort_from_prepare;
+    uint32_t hw_task_abort_from_cleanup;
+    uint32_t hw_task_abort_from_deinit;
+    uint32_t cc2_handler_skip_disabled;
+    uint32_t lptimer_schedule_at_enter;
+    uint32_t lptimer_disable_enter;
+    uint32_t lptimer_disable_while_hw_ready;
+    uint32_t hw_task_local_setup_enter;
+    uint32_t hw_task_local_setup_skip_invalid;
+    uint32_t hw_task_local_clear_enter;
+    uint32_t last_hw_task_state;
+    uint32_t last_hw_task_state_at_no_resources;
+    uint32_t last_hw_task_state_at_cleanup_fail;
+    uint32_t last_hw_task_ppi;
+    uint32_t last_hw_task_fire_lpticks;
+    uint32_t last_hw_task_grtc_at_prepare;
+    uint32_t last_hw_task_grtc_at_cleanup;
+    uint32_t last_hw_task_cc_evt_at_cleanup;
     uint32_t rsch_dly_start;
     uint32_t rsch_dly_start_no_hfclk;
     uint32_t rsch_all_prec_update;
@@ -91,6 +120,42 @@ typedef struct
     uint32_t tx_done_success;
 
     uint32_t rx_frame;
+    uint32_t rx_timestamp_ok;
+    uint32_t rx_no_timestamp;
+
+    /* otPlatRadioReceiveAt (CSL window scheduling). */
+    uint32_t csl_receive_at_enter;
+    uint32_t csl_receive_at_ok;
+    uint32_t csl_receive_at_fail;
+    uint32_t last_csl_channel;
+    uint32_t last_csl_win_start;
+    uint32_t last_csl_win_duration;
+    uint32_t last_csl_receive_at_arg_start;
+    uint32_t last_grtc_at_csl_receive_at;
+
+    /* nrf_802154_core rx_init() — CSL/DRX HW trigger path (NRF54_DEBUG_STATS). */
+    uint32_t rx_init_enter;
+    uint32_t rx_init_hw_enter;
+    uint32_t rx_init_skip_no_timeslot;
+    uint32_t rx_init_hw_skip_no_timeslot;
+    uint32_t rx_init_skip_precond;
+    uint32_t rx_init_hw_skip_precond;
+    uint32_t rx_init_hw_reach_ppi;
+    uint32_t rx_init_hw_ppi_update_fail;
+    uint32_t rx_init_hw_ppi_update_ok;
+    uint32_t core_receive_delayed_trx_enter;
+    uint32_t core_receive_delayed_trx_term_fail;
+    uint32_t core_receive_delayed_trx_rx_init;
+    uint32_t core_receive_delayed_trx_hw_fallback;
+    uint32_t core_receive_delayed_trx_core_enter;
+    uint32_t core_receive_delayed_trx_skipped_already_rx;
+    uint32_t core_receive_delayed_trx_skipped_tx_ack;
+
+    /* nrf_802154_delayed_trx DRX started_callback / receive_attempt. */
+    uint32_t drx_started_callback_enter;
+    uint32_t drx_started_callback_canceled;
+    uint32_t drx_receive_attempt_enter;
+    uint32_t drx_receive_attempt_ok;
 
     uint32_t last_tx_length;
     uint32_t last_tx_channel;
