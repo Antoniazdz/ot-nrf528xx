@@ -557,31 +557,35 @@ void nrf_802154_platform_sl_lp_timer_init(void)
  {
      bool cc_triggered;
  
-     g_nrf54_debug_stats.hw_task_update_ppi_enter++;
-     g_nrf54_debug_stats.last_hw_task_ppi = ppi_channel;
-     hw_task_stats_snap_state();
- 
-     if (!hw_task_state_set(HW_TASK_STATE_READY, HW_TASK_STATE_UPDATING))
-     {
-         g_nrf54_debug_stats.hw_task_update_ppi_wrong_state++;
-         return NRF_802154_SL_LPTIMER_PLATFORM_WRONG_STATE;
-     }
- 
-     nrf_802154_platform_sl_lptimer_hw_task_local_domain_connections_setup(ppi_channel, m_hw_task_channel);
- 
-     cc_triggered = hw_task_compare_evt_check();
-     if (nrfx_grtc_syscounter_get() >= m_hw_task_fire_lpticks)
-     {
-         cc_triggered = true;
-     }
- 
-     (void)hw_task_state_set(HW_TASK_STATE_UPDATING, HW_TASK_STATE_READY);
- 
-     if (cc_triggered)
-     {
-         g_nrf54_debug_stats.hw_task_update_ppi_too_late++;
-         return NRF_802154_SL_LPTIMER_PLATFORM_TOO_LATE;
-     }
+    g_nrf54_debug_stats.hw_task_update_ppi_enter++;
+    g_nrf54_debug_stats.last_hw_task_ppi = ppi_channel;
+    g_nrf54_debug_stats.last_hw_task_grtc_at_update_ppi = (uint32_t)nrfx_grtc_syscounter_get();
+    hw_task_stats_snap_state();
+
+    if (!hw_task_state_set(HW_TASK_STATE_READY, HW_TASK_STATE_UPDATING))
+    {
+        g_nrf54_debug_stats.hw_task_update_ppi_wrong_state++;
+        return NRF_802154_SL_LPTIMER_PLATFORM_WRONG_STATE;
+    }
+
+    nrf_802154_platform_sl_lptimer_hw_task_local_domain_connections_setup(ppi_channel, m_hw_task_channel);
+
+    cc_triggered = hw_task_compare_evt_check();
+    if (nrfx_grtc_syscounter_get() >= m_hw_task_fire_lpticks)
+    {
+        cc_triggered = true;
+    }
+
+    g_nrf54_debug_stats.last_hw_task_cc_at_update_ppi = cc_triggered ? 1U : 0U;
+
+    (void)hw_task_state_set(HW_TASK_STATE_UPDATING, HW_TASK_STATE_READY);
+
+    if (cc_triggered)
+    {
+        g_nrf54_debug_stats.hw_task_update_ppi_too_late++;
+        g_nrf54_debug_stats.hw_task_update_ppi_cc_already_triggered++;
+        return NRF_802154_SL_LPTIMER_PLATFORM_TOO_LATE;
+    }
  
      g_nrf54_debug_stats.hw_task_update_ppi_ok++;
      return NRF_802154_SL_LPTIMER_PLATFORM_SUCCESS;

@@ -124,6 +124,7 @@ static int8_t   sEnergyDetected;
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 static uint32_t      sCslPeriod;
 static uint32_t      sCslSampleTime;
+static bool          sCslHfclkHeld; /* CSL-F1: HFCLK ref-count while CSL active */
 static const uint8_t sCslIeHeader[OT_IE_HEADER_SIZE] = {CSL_IE_HEADER_BYTES_LO, CSL_IE_HEADER_BYTES_HI};
 
 static uint16_t getCslPhase(void);
@@ -141,6 +142,7 @@ typedef enum
 } RadioPendingEvents;
 
 static uint32_t sPendingEvents;
+static bool     sRxOnWhenIdle = true;
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
 static uint32_t         sMacFrameCounter;
@@ -242,6 +244,7 @@ static void dataInit(void)
     memset(&sAckFrame, 0, sizeof(sAckFrame));
 
     sPrevMacFrameCounter = 0;
+    sRxOnWhenIdle        = true;
 
     SetRadioDriverState(NRF_802154_STATE_SLEEP);
 }
@@ -292,6 +295,18 @@ static void resetPendingEvent(RadioPendingEvents aEvent)
         pendingEvents &= bitsToRemain;
     } while (__STREXW(pendingEvents, (uint32_t *)&sPendingEvents));
 }
+
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+/* CSL-P0-F3b: after poll on mesh channel, leave HW RX so DRX callback is not skipped. */
+static void cslScheduleSleepIfChildRxOff(void)
+{
+    if ((sCslPeriod > 0) && !sRxOnWhenIdle && !IsRadioDriverStateSleep())
+    {
+        g_nrf54_debug_stats.csl_sleep_after_poll_schedule++;
+        setPendingEvent(kPendingEventSleep);
+    }
+}
+#endif
 
 static inline void clearPendingEvents(void)
 {
@@ -679,17 +694,51 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
     OT_UNUSED_VARIABLE(aInstance);
 
     bool     result;
+    bool     cancelOk;
+    uint32_t nowUs = (uint32_t)otPlatTimeGet();
+    int32_t  leadUs = (int32_t)(aStart - nowUs);
     uint64_t rxTime = unwrapFutureRadioTimeUs(aStart);
 
     g_nrf54_debug_stats.csl_receive_at_enter++;
-    g_nrf54_debug_stats.last_csl_channel              = aChannel;
-    g_nrf54_debug_stats.last_csl_win_start            = aStart;
-    g_nrf54_debug_stats.last_csl_win_duration         = aDuration;
-    g_nrf54_debug_stats.last_csl_receive_at_arg_start = (uint32_t)rxTime;
-    g_nrf54_debug_stats.last_grtc_at_csl_receive_at   = (uint32_t)otPlatTimeGet();
+    g_nrf54_debug_stats.last_csl_channel                      = aChannel;
+    g_nrf54_debug_stats.last_csl_win_start                    = aStart;
+    g_nrf54_debug_stats.last_csl_win_duration                 = aDuration;
+    g_nrf54_debug_stats.last_csl_receive_at_arg_start         = (uint32_t)rxTime;
+    g_nrf54_debug_stats.last_csl_rx_time_arg                  = (uint32_t)rxTime;
+    g_nrf54_debug_stats.last_grtc_at_csl_receive_at           = nowUs;
+    g_nrf54_debug_stats.last_csl_start_minus_now_us           = aStart - nowUs;
+    g_nrf54_debug_stats.last_driver_state_at_csl_receive_at   = (uint32_t)sDriverState;
+    g_nrf54_debug_stats.last_rx_on_when_idle_at_csl_receive_at = sRxOnWhenIdle ? 1U : 0U;
+
+    if (leadUs < 0)
+    {
+        g_nrf54_debug_stats.csl_plat_win_in_past++;
+        g_nrf54_debug_stats.last_csl_plat_win_past_by_us = (uint32_t)(-leadUs);
+    }
+    else if ((uint32_t)leadUs < 400U)
+    {
+        g_nrf54_debug_stats.csl_plat_win_lead_short++;
+    }
+    else
+    {
+        g_nrf54_debug_stats.csl_plat_win_lead_ok++;
+    }
 
     nrf_802154_tx_power_set(GetTransmitPowerForChannel(aChannel));
-    (void)nrf_802154_receive_at_scheduled_cancel(DRX_SLOT_RX);
+
+    g_nrf54_debug_stats.csl_scheduled_cancel_enter++;
+    cancelOk = nrf_802154_receive_at_scheduled_cancel(DRX_SLOT_RX);
+    if (cancelOk)
+    {
+        g_nrf54_debug_stats.csl_scheduled_cancel_ok++;
+        g_nrf54_debug_stats.csl_scheduled_cancel_ret_true++;
+    }
+    else
+    {
+        g_nrf54_debug_stats.csl_scheduled_cancel_fail++;
+        g_nrf54_debug_stats.csl_scheduled_cancel_ret_false++;
+    }
+
     result = nrf_802154_receive_at(rxTime, aDuration, aChannel, DRX_SLOT_RX);
     clearPendingEvents();
 
@@ -923,7 +972,27 @@ otRadioCaps otPlatRadioGetCaps(otInstance *aInstance)
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
                          OT_RADIO_CAPS_TRANSMIT_SEC | OT_RADIO_CAPS_TRANSMIT_TIMING | OT_RADIO_CAPS_RECEIVE_TIMING |
 #endif
-                         OT_RADIO_CAPS_SLEEP_TO_TX);
+                         OT_RADIO_CAPS_RX_ON_WHEN_IDLE | OT_RADIO_CAPS_SLEEP_TO_TX);
+}
+
+void otPlatRadioSetRxOnWhenIdle(otInstance *aInstance, bool aEnable)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+
+    g_nrf54_debug_stats.rx_on_when_idle_set_enter++;
+
+    sRxOnWhenIdle = aEnable;
+    nrf_802154_rx_on_when_idle_set(sRxOnWhenIdle);
+
+    if (sRxOnWhenIdle)
+    {
+        g_nrf54_debug_stats.rx_on_when_idle_set_true++;
+    }
+    else
+    {
+        g_nrf54_debug_stats.rx_on_when_idle_set_false++;
+        (void)nrf_802154_sleep_if_idle();
+    }
 }
 
 bool otPlatRadioGetPromiscuous(otInstance *aInstance)
@@ -1203,6 +1272,10 @@ void nrf5RadioProcess(otInstance *aInstance)
         g_nrf54_debug_stats.tx_done_success++;
         otPlatRadioTxDone(aInstance, &sTransmitFrame, ackPtr, OT_ERROR_NONE);
 
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+        cslScheduleSleepIfChildRxOff(); /* CSL-P0-F3b */
+#endif
+
         if (sAckFrame.mPsdu != NULL)
         {
             nrf_802154_buffer_free_raw(sAckFrame.mPsdu - 1);
@@ -1215,6 +1288,9 @@ void nrf5RadioProcess(otInstance *aInstance)
         resetPendingEvent(kPendingEventChannelAccessFailure);
         g_nrf54_debug_stats.tx_done_busy++;
         otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_CHANNEL_ACCESS_FAILURE);
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+        cslScheduleSleepIfChildRxOff(); /* CSL-P0-F3b */
+#endif
     }
 
     if (isPendingEventSet(kPendingEventInvalidOrNoAck))
@@ -1222,6 +1298,9 @@ void nrf5RadioProcess(otInstance *aInstance)
         resetPendingEvent(kPendingEventInvalidOrNoAck);
         g_nrf54_debug_stats.tx_done_no_ack++;
         otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_NO_ACK);
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+        cslScheduleSleepIfChildRxOff(); /* CSL-P0-F3b */
+#endif
     }
 
     if (isPendingEventSet(kPendingEventReceiveFailed))
@@ -1333,7 +1412,31 @@ void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lq
 
 void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
 {
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+    if (id == DRX_SLOT_RX && error == NRF_802154_RX_ERROR_DELAYED_TIMEOUT)
+    {
+        g_nrf54_debug_stats.csl_drx_timeout_enter++;
+
+        sAckedWithFramePending = false;
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+        sAckedWithSecEnhAck = false;
+#endif
+
+        /* CSL-P0-F3a: NCS/baseline contract — sleep after CSL window for all children
+         * (including rx-off sleepy child). Replaces early return that blocked sleep. */
+        g_nrf54_debug_stats.csl_drx_timeout_schedule_sleep++;
+        setPendingEvent(kPendingEventSleep);
+        otSysEventSignalPending();
+        return;
+    }
+
+    if (id == DRX_SLOT_RX)
+    {
+        g_nrf54_debug_stats.csl_drx_receive_failed_other++;
+    }
+#else
     OT_UNUSED_VARIABLE(id);
+#endif
 
     switch (error)
     {
@@ -1670,6 +1773,22 @@ otError otPlatRadioEnableCsl(otInstance         *aInstance,
                              const otExtAddress *aExtAddr)
 {
     sCslPeriod = aCslPeriod;
+
+    /* CSL-F1-BEGIN: hold HFCLK between CSL windows (revert F1: remove block through CSL-F1-END) */
+    if (aCslPeriod > 0)
+    {
+        if (!sCslHfclkHeld)
+        {
+            nrf_802154_clock_hfclk_start();
+            sCslHfclkHeld = true;
+        }
+    }
+    else if (sCslHfclkHeld)
+    {
+        nrf_802154_clock_hfclk_stop();
+        sCslHfclkHeld = false;
+    }
+    /* CSL-F1-END */
 
     updateIeData(aInstance, aShortAddr, aExtAddr);
 

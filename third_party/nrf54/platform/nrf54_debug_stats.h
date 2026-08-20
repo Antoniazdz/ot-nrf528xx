@@ -14,7 +14,7 @@ typedef struct
 {   uint32_t grtc2_isr_enter;
     uint32_t compare_handler_enter;   /* na samym początku, PRZED m_enabled */
     uint32_t sl_timer_handler_enter;
-    uint32_t sl_timer_fire_immediate;
+    //uint32_t sl_timer_fire_immediate;
     uint32_t cc2_timer_fires;
     uint32_t cc0_timer_fires;
     uint32_t cc1_timer_fires;
@@ -69,6 +69,9 @@ typedef struct
 
     uint32_t tx_fail_busy_channel;
     uint32_t hfclk_ready_calls;
+    uint32_t hfclk_latency_set_calls; /* CSL-F1: hfclk_warm_latency_apply() */
+
+    uint32_t csl_alarm_process_early; /* CSL-F4.1: nrf54ProcessMainLoop early alarm */
 
     uint32_t tx_enter;
     uint32_t tx_csma_enter;
@@ -127,13 +130,34 @@ typedef struct
     uint32_t csl_receive_at_enter;
     uint32_t csl_receive_at_ok;
     uint32_t csl_receive_at_fail;
+    uint32_t csl_plat_win_in_past;       /* winStart < now at platform ReceiveAt */
+    uint32_t csl_plat_win_lead_short;  /* 0 <= lead < 400 us (warm RSCH min) */
+    uint32_t csl_plat_win_lead_ok;       /* lead >= 400 us */
+    uint32_t last_csl_plat_win_past_by_us; /* now - winStart when in past */
     uint32_t last_csl_channel;
     uint32_t last_csl_win_start;
     uint32_t last_csl_win_duration;
     uint32_t last_csl_receive_at_arg_start;
     uint32_t last_grtc_at_csl_receive_at;
 
-    /* nrf_802154_core rx_init() — CSL/DRX HW trigger path (NRF54_DEBUG_STATS). */
+    /* OpenThread SubMac CSL path (sub_mac_csl_receiver.cpp). */
+    uint32_t csl_handle_csl_timer_enter;
+    uint32_t csl_handle_csl_receive_at_enter;
+    uint32_t csl_receive_at_ot_called;          /* Radio::ReceiveAt actually invoked */
+    uint32_t csl_skip_submac_disabled;
+    uint32_t csl_skip_submac_receive;           /* mState == kStateReceive — main skip */
+    uint32_t csl_receive_at_called_during_tx;   /* called while CsmaBackoff/Transmit */
+    uint32_t csl_ot_win_in_past;                /* winStart < now at OT schedule time */
+    uint32_t csl_ot_win_lead_short;             /* 0 <= lead < 400 us */
+    uint32_t csl_ot_win_lead_ok;                /* lead >= 400 us */
+    uint32_t last_csl_submac_state;             /* SubMac::State at last HandleCslReceiveAt */
+    uint32_t last_csl_ot_win_start_minus_now_us; /* signed lead, bit pattern (int32) */
+
+    /* OT micro alarm (CSL mCslTimer, alarm_nrf54.c). */
+    uint32_t ot_us_alarm_compare_match;
+    uint32_t ot_us_alarm_fired;
+
+    /* Snapshots at last otPlatRadioReceiveAt (platform). */
     uint32_t rx_init_enter;
     uint32_t rx_init_hw_enter;
     uint32_t rx_init_skip_no_timeslot;
@@ -175,6 +199,89 @@ typedef struct
 
     uint32_t last_tx_counter_injected;       /* snapshot: last TX injected frame counter */
     uint32_t last_tx_late_encrypted;         /* snapshot: last TX late-encrypted in hook */
+
+    /* Sleepy-child lifecycle (RxOnWhenIdle / CSL window gaps). */
+    uint32_t radio_auto_sleep_enter;
+    uint32_t radio_auto_sleep_ok;
+    uint32_t radio_force_sleep_defer_hw;
+
+    /* otPlatRadioSetRxOnWhenIdle / driver PIB. */
+    uint32_t rx_on_when_idle_set_enter;
+    uint32_t rx_on_when_idle_set_true;
+    uint32_t rx_on_when_idle_set_false;
+
+    /* otPlatRadioReceiveAt — scheduled_cancel before receive_at.
+     * NOTE: csl_scheduled_cancel_ok counts API return true (includes not_found!).
+     * Use drx_scheduled_cancel_ok / not_found for slot truth. */
+    uint32_t csl_scheduled_cancel_enter;
+    uint32_t csl_scheduled_cancel_ok;
+    uint32_t csl_scheduled_cancel_fail;
+    uint32_t csl_scheduled_cancel_ret_true;  /* API returned true (misleading if not_found) */
+    uint32_t csl_scheduled_cancel_ret_false; /* API returned false */
+
+    /* Snapshots at last otPlatRadioReceiveAt (platform). */
+    uint32_t last_driver_state_at_csl_receive_at;
+    uint32_t last_rx_on_when_idle_at_csl_receive_at;
+    uint32_t last_csl_start_minus_now_us;
+    uint32_t last_csl_rx_time_arg;
+
+    /* nrf_802154_delayed_trx_receive() fail breakdown. */
+    uint32_t drx_receive_enter;
+    uint32_t drx_receive_ok;
+    uint32_t drx_receive_fail_duplicate_id;
+    uint32_t drx_receive_fail_no_slot;
+    uint32_t drx_receive_fail_rsch;
+    uint32_t last_drx_fail_reason; /* 0=none 1=dup_id 2=no_slot 3=rsch */
+    uint32_t drx_trigger_in_past;       /* trigger_time < now at schedule */
+    uint32_t drx_trigger_lead_short;    /* 0 <= lead < 152 us (warm PREC) */
+    uint32_t drx_trigger_lead_ok;       /* lead >= 152 us */
+    uint32_t last_drx_trigger_minus_now_us; /* signed lead, bit pattern (int32) */
+
+    /* dly_op_request → nrf_802154_rsch_delayed_timeslot_request(). */
+    uint32_t drx_rsch_request_enter;
+    uint32_t drx_rsch_request_ok;
+    uint32_t drx_rsch_request_fail;
+
+    /* nrf_802154_delayed_trx_receive_scheduled_cancel(). */
+    uint32_t drx_scheduled_cancel_enter;
+    uint32_t drx_scheduled_cancel_not_found;
+    uint32_t drx_scheduled_cancel_ok;
+    uint32_t drx_scheduled_cancel_fail;
+
+    /* nrf_802154_delayed_trx_receive_cancel(). */
+    uint32_t drx_cancel_enter;
+    uint32_t drx_cancel_not_found;
+    uint32_t drx_cancel_ok;
+    uint32_t drx_cancel_fail;
+
+    /* rx_timeslot_started_callback / receive_attempt. */
+    uint32_t drx_started_state_set_fail;
+    uint32_t drx_started_attempt_fail;
+    uint32_t drx_receive_attempt_channel_fail;
+    uint32_t drx_receive_attempt_fail;
+    uint32_t drx_timeout_notify;
+
+    /* Platform receive_failed(DRX_SLOT, DELAYED_TIMEOUT). */
+    uint32_t csl_drx_timeout_enter;
+    uint32_t csl_drx_timeout_rx_off_skip; /* deprecated: pre-P0-F3a path */
+    uint32_t csl_drx_timeout_schedule_sleep;
+    uint32_t csl_sleep_after_poll_schedule; /* CSL-P0-F3b: sleep after poll TX done */
+    uint32_t csl_drx_receive_failed_other;
+
+    /* nrf_802154_core switch_to_idle(). */
+    uint32_t switch_to_idle_enter;
+    uint32_t switch_to_idle_sleep;
+    uint32_t switch_to_idle_rx;
+
+    /* Core state snapshots (RADIO_STATE_* at event). */
+    uint32_t last_core_state_at_rx_init_skip_precond;
+    uint32_t last_core_state_at_delayed_skip_rx;
+    uint32_t last_core_state_at_drx_receive_attempt;
+
+    /* hw_task_update_ppi timing (platform lptimer). */
+    uint32_t last_hw_task_grtc_at_update_ppi;
+    uint32_t last_hw_task_cc_at_update_ppi;
+    uint32_t hw_task_update_ppi_cc_already_triggered;
 } nrf54_debug_stats_t;
 
 extern volatile nrf54_debug_stats_t g_nrf54_debug_stats;
