@@ -46,7 +46,14 @@
 #include "platform-nrf5-transport.h"
 #include "platform-nrf5.h"
 
-#include <openthread/config.h>
+#include <nrfx.h>
+/* CSL-F4.1-BEGIN: tasklets + debug stats for nrf54ProcessMainLoop */
+#include <openthread/tasklet.h>
+
+#ifdef NRF54_DEBUG_STATS
+#include "nrf54_debug_stats.h"
+#endif
+/* CSL-F4.1-END */
 
 #if !OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS_MANAGEMENT && PLATFORM_OPENTHREAD_VANILLA
 
@@ -120,13 +127,35 @@ bool otSysPseudoResetWasRequested(void)
 
 void otSysProcessDrivers(otInstance *aInstance)
 {
+    /* CSL-F4.1-BEGIN: alarm before radio (was last in driver pass) */
+    nrf5AlarmProcess(aInstance);
+    /* CSL-F4.1-END */
     nrf5RadioProcess(aInstance);
     nrf5TransportProcess();
     nrf5TempProcess();
-    nrf5AlarmProcess(aInstance);
 }
 
-__WEAK void otSysEventSignalPending(void)
+/* CSL-F4.1-BEGIN: __SEV() wake (was __WEAK empty stub) */
+void otSysEventSignalPending(void)
 {
-    // Intentionally empty
+    __SEV();
 }
+/* CSL-F4.1-END */
+
+/* CSL-F4.1-BEGIN: early CSL µs alarm before tasklets */
+void nrf54ProcessMainLoop(otInstance *aInstance)
+{
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+    if (nrf5AlarmIsPending())
+    {
+#ifdef NRF54_DEBUG_STATS
+        g_nrf54_debug_stats.csl_alarm_process_early++;
+#endif
+        nrf5AlarmProcess(aInstance);
+    }
+#endif
+
+    otTaskletsProcess(aInstance);
+    otSysProcessDrivers(aInstance);
+}
+/* CSL-F4.1-END */

@@ -89,6 +89,11 @@ list(APPEND OT_PUBLIC_INCLUDES
 set(OT_PLATFORM_DEFINES ${OT_PLATFORM_DEFINES} PARENT_SCOPE)
 target_compile_definitions(ot-config INTERFACE
     "MBEDTLS_USER_CONFIG_FILE=\"nrf54l15-mbedtls-config.h\""
+    PLATFORM_OPENTHREAD_VANILLA=1 # CSL-F4.1: exposes define to main.c for nrf54ProcessMainLoop
+    NRF54_DEBUG_STATS=1
+)
+target_include_directories(ot-config INTERFACE
+    "${PROJECT_SOURCE_DIR}/third_party/nrf54/platform"
 )
 set(OT_PUBLIC_INCLUDES ${OT_PUBLIC_INCLUDES} PARENT_SCOPE)
 

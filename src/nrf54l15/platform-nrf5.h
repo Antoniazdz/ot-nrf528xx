@@ -55,6 +55,10 @@ void nrf5AlarmDeinit(void);
  */
 void nrf5AlarmProcess(otInstance *aInstance);
 
+/* CSL-F4.1-BEGIN: early CSL alarm before tasklets (revert F4.1: remove through CSL-F4.1-END) */
+bool nrf5AlarmIsPending(void);
+/* CSL-F4.1-END */
+
 /**
  * Function for geting current time in mircosecond.
  *
@@ -126,6 +130,10 @@ void nrf5RadioProcess(otInstance *aInstance);
  *
  */
 void nrf5RadioClearPendingEvents(void);
+
+/* CSL-F4.1-BEGIN: nRF54 main loop (see system_nrf54.c, main.c) */
+void nrf54ProcessMainLoop(otInstance *aInstance);
+/* CSL-F4.1-END */
 
 /**
  * Initialization of hardware crypto engine.

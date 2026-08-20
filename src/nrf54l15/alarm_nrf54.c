@@ -203,12 +203,18 @@
  
      uint64_t now = GetCurrentTime(aIndex);
  
-     if (aSkipCheck || AlarmShallStrike(now, aIndex))
-     {
-         sTimerData[aIndex].mFireAlarm = true;
-         sEventPending                 = true;
-         otSysEventSignalPending();
-     }
+    if (aSkipCheck || AlarmShallStrike(now, aIndex))
+    {
+#ifdef NRF54_DEBUG_STATS
+        if (aIndex == kUsTimer)
+        {
+            g_nrf54_debug_stats.ot_us_alarm_compare_match++;
+        }
+#endif
+        sTimerData[aIndex].mFireAlarm = true;
+        sEventPending                 = true;
+        otSysEventSignalPending();
+    }
  }
  
  static void TimerStartAt(uint32_t aT0, uint32_t aDt, AlarmIndex aIndex, const uint64_t *aNow)
@@ -322,18 +328,28 @@
      sEventPending = false;
  }
  
+/* CSL-F4.1-BEGIN: pending check for early alarm in main loop */
+bool nrf5AlarmIsPending(void)
+{
+    return sEventPending || sTimerData[kUsTimer].mFireAlarm || sTimerData[kMsTimer].mFireAlarm;
+}
+/* CSL-F4.1-END */
+
  void nrf5AlarmProcess(otInstance *aInstance)
  {
      do
      {
          sEventPending = false;
  
-         if (sTimerData[kUsTimer].mFireAlarm)
-         {
-             sTimerData[kUsTimer].mFireAlarm = false;
- 
-             otPlatAlarmMicroFired(aInstance);
-         }
+        if (sTimerData[kUsTimer].mFireAlarm)
+        {
+            sTimerData[kUsTimer].mFireAlarm = false;
+
+#ifdef NRF54_DEBUG_STATS
+            g_nrf54_debug_stats.ot_us_alarm_fired++;
+#endif
+            otPlatAlarmMicroFired(aInstance);
+        }
  
          if (sTimerData[kMsTimer].mFireAlarm)
          {
