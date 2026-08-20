@@ -678,15 +678,9 @@ otError otPlatRadioReceive(otInstance *aInstance, uint8_t aChannel)
 static uint64_t unwrapFutureRadioTimeUs(uint32_t aTimeUs)
 {
     uint64_t nowUs = otPlatTimeGet();
-    uint32_t nowLo = (uint32_t)nowUs;
-    uint64_t rxTime = (nowUs & ~(uint64_t)UINT32_MAX) | aTimeUs;
 
-    if (nowLo > aTimeUs)
-    {
-        rxTime += (uint64_t)UINT32_MAX + 1U;
-    }
-
-    return rxTime;
+    /* 32-bit OT radio time → 64-bit GRTC: signed delta unwrap (same rule as alarm_nrf54.c / 52840 radio.c). */
+    return nowUs + (int32_t)(aTimeUs - (uint32_t)nowUs);
 }
 
 otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t aStart, uint32_t aDuration)
@@ -695,9 +689,16 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
 
     bool     result;
     bool     cancelOk;
-    uint32_t nowUs = (uint32_t)otPlatTimeGet();
-    int32_t  leadUs = (int32_t)(aStart - nowUs);
-    uint64_t rxTime = unwrapFutureRadioTimeUs(aStart);
+    uint64_t nowUsFull = otPlatTimeGet();
+    uint32_t nowUs     = (uint32_t)nowUsFull;
+    int32_t  leadUs    = (int32_t)(aStart - nowUs);
+    uint64_t rxTime    = unwrapFutureRadioTimeUs(aStart);
+
+    /* Late CSL window: schedule from now so CC8/hw_task is not TOO_LATE (duration still covers the remainder). */
+    if (rxTime < nowUsFull)
+    {
+        rxTime = nowUsFull;
+    }
 
     g_nrf54_debug_stats.csl_receive_at_enter++;
     g_nrf54_debug_stats.last_csl_channel                      = aChannel;
@@ -1490,7 +1491,18 @@ static uint16_t getCslPhase(void)
     uint32_t curTime       = otPlatAlarmMicroGetNow();
     uint32_t cslPeriodInUs = sCslPeriod * OT_US_PER_TEN_SYMBOLS;
     uint32_t diff = (cslPeriodInUs - (curTime % cslPeriodInUs) + (sCslSampleTime % cslPeriodInUs)) % cslPeriodInUs;
-    return (uint16_t)(diff / OT_US_PER_TEN_SYMBOLS + 1);
+    uint16_t phase = (uint16_t)(diff / OT_US_PER_TEN_SYMBOLS + 1);
+
+    g_nrf54_debug_stats.get_csl_phase_enter++;
+    g_nrf54_debug_stats.last_sCslSampleTime_at_phase = sCslSampleTime;
+    g_nrf54_debug_stats.last_csl_phase_diff_us       = diff;
+    g_nrf54_debug_stats.last_csl_phase               = phase;
+    if (sCslSampleTime == 0U)
+    {
+        g_nrf54_debug_stats.get_csl_phase_sample_time_zero++;
+    }
+
+    return phase;
 }
 #endif
 
@@ -1799,7 +1811,9 @@ void otPlatRadioUpdateCslSampleTime(otInstance *aInstance, uint32_t aCslSampleTi
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    sCslSampleTime = aCslSampleTime;
+    g_nrf54_debug_stats.update_csl_sample_time_enter++;
+    g_nrf54_debug_stats.last_update_csl_sample_time = aCslSampleTime;
+    sCslSampleTime                                  = aCslSampleTime;
 }
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 

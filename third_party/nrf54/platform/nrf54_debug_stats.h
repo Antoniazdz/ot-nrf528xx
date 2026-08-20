@@ -282,6 +282,15 @@ typedef struct
     uint32_t last_hw_task_grtc_at_update_ppi;
     uint32_t last_hw_task_cc_at_update_ppi;
     uint32_t hw_task_update_ppi_cc_already_triggered;
+
+    /* getCslPhase() — snapshot sCslSampleTime value at each call (radio_nrf54.c). */
+    uint32_t get_csl_phase_enter;
+    uint32_t get_csl_phase_sample_time_zero; /* sCslSampleTime == 0 at getCslPhase() */
+    uint32_t last_sCslSampleTime_at_phase;   /* raw value passed into line 1492 */
+    uint32_t last_csl_phase_diff_us;
+    uint32_t last_csl_phase;                 /* returned phase (ten-symbols + 1) */
+    uint32_t update_csl_sample_time_enter;
+    uint32_t last_update_csl_sample_time;    /* arg to otPlatRadioUpdateCslSampleTime */
 } nrf54_debug_stats_t;
 
 extern volatile nrf54_debug_stats_t g_nrf54_debug_stats;
