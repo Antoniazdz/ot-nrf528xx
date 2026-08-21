@@ -40,6 +40,7 @@ set(NRF_COMM_SOURCES
     ${NRF_PLATFORM_DIR}/flash_nosd.c
     ${NRF_PLATFORM_DIR}/logging.c
     ${NRF_PLATFORM_DIR}/misc_nrf54.c
+    ${NRF_PLATFORM_DIR}/ot_tasklet_wrap.c
     ${NRF_PLATFORM_DIR}/radio_nrf54.c
     ${NRF_PLATFORM_DIR}/system_nrf54.c
     ${NRF_PLATFORM_DIR}/temp_nrf54.c
@@ -89,7 +90,7 @@ list(APPEND OT_PUBLIC_INCLUDES
 set(OT_PLATFORM_DEFINES ${OT_PLATFORM_DEFINES} PARENT_SCOPE)
 target_compile_definitions(ot-config INTERFACE
     "MBEDTLS_USER_CONFIG_FILE=\"nrf54l15-mbedtls-config.h\""
-    PLATFORM_OPENTHREAD_VANILLA=1 # CSL-F4.1: exposes define to main.c for nrf54ProcessMainLoop
+    PLATFORM_OPENTHREAD_VANILLA=1 # CSL-F4.1: ot_tasklet_wrap.c (--wrap=otTaskletsProcess)
     NRF54_DEBUG_STATS=1
 )
 target_include_directories(ot-config INTERFACE
@@ -218,3 +219,10 @@ target_include_directories(openthread-nrf54l15-sdk
 
 target_include_directories(ot-config INTERFACE ${OT_PUBLIC_INCLUDES})
 target_compile_definitions(ot-config INTERFACE ${OT_PLATFORM_DEFINES})
+
+# CSL-F4.1: early µs alarm before OT tasklets (vanilla main.c unchanged).
+foreach(_nrf54_ot_app IN ITEMS ot-cli-ftd ot-cli-mtd ot-rcp ot-ncp-ftd ot-ncp-mtd)
+    if(TARGET ${_nrf54_ot_app})
+        target_link_options(${_nrf54_ot_app} PRIVATE "LINKER:--wrap=otTaskletsProcess")
+    endif()
+endforeach()
