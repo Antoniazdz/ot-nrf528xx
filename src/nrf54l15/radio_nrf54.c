@@ -67,6 +67,7 @@
 #include "platform/nrf_802154_clock.h"
 
 #include "nrf54_debug_stats.h"
+#include "nrf54_csl_debug.h"
 
 #include <openthread-core-config.h>
 #include <openthread/config.h>
@@ -78,6 +79,7 @@
 #define US_PER_MS             1000ULL      ///< Microseconds in millisecond.
 
 #define RSSI_SETTLE_TIME_US   40           ///< RSSI settle time in microseconds.
+#define SAFE_DELTA            1000         ///< Head-start before winStart (parity nRF52840 radio.c).
 #define DRX_SLOT_RX           0            ///< Delayed reception window ID for CSL.
 
 #define CSL_UNCERT            20           ///< The Uncertainty of the scheduling CSL of transmission by the parent, in ±10 us units.
@@ -689,16 +691,11 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
 
     bool     result;
     bool     cancelOk;
-    uint64_t nowUsFull = otPlatTimeGet();
-    uint32_t nowUs     = (uint32_t)nowUsFull;
-    int32_t  leadUs    = (int32_t)(aStart - nowUs);
-    uint64_t rxTime    = unwrapFutureRadioTimeUs(aStart);
-
-    /* Late CSL window: schedule from now so CC8/hw_task is not TOO_LATE (duration still covers the remainder). */
-    if (rxTime < nowUsFull)
-    {
-        rxTime = nowUsFull;
-    }
+    uint64_t nowUsFull  = otPlatTimeGet();
+    uint32_t nowUs      = (uint32_t)nowUsFull;
+    int32_t  leadUs     = (int32_t)(aStart - nowUs);
+    uint64_t rxTime     = unwrapFutureRadioTimeUs(aStart - SAFE_DELTA);
+    uint32_t rxDuration = aDuration + SAFE_DELTA;
 
     g_nrf54_debug_stats.csl_receive_at_enter++;
     g_nrf54_debug_stats.last_csl_channel                      = aChannel;
@@ -715,8 +712,19 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
     {
         g_nrf54_debug_stats.csl_plat_win_in_past++;
         g_nrf54_debug_stats.last_csl_plat_win_past_by_us = (uint32_t)(-leadUs);
+        g_nrf54_debug_stats.csl_receive_at_fail++;
+        return OT_ERROR_FAILED;
     }
-    else if ((uint32_t)leadUs < 400U)
+
+    if (rxTime < nowUsFull)
+    {
+        g_nrf54_debug_stats.csl_plat_win_in_past++;
+        g_nrf54_debug_stats.last_csl_plat_win_past_by_us = (uint32_t)(nowUsFull - rxTime);
+        g_nrf54_debug_stats.csl_receive_at_fail++;
+        return OT_ERROR_FAILED;
+    }
+
+    if ((uint32_t)leadUs < 400U)
     {
         g_nrf54_debug_stats.csl_plat_win_lead_short++;
     }
@@ -740,8 +748,15 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
         g_nrf54_debug_stats.csl_scheduled_cancel_ret_false++;
     }
 
-    result = nrf_802154_receive_at(rxTime, aDuration, aChannel, DRX_SLOT_RX);
+    result = nrf_802154_receive_at(rxTime, rxDuration, aChannel, DRX_SLOT_RX);
     clearPendingEvents();
+
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+    if (sCslPeriod > 0U)
+    {
+        nrf54CslDebugPlatReceiveAt(aChannel, aStart, aDuration, (uint16_t)sCslPeriod);
+    }
+#endif
 
     if (result)
     {
@@ -1408,6 +1423,20 @@ void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lq
     sAckedWithSecEnhAck = false;
 #endif
 
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+    if (sCslPeriod > 0U)
+    {
+        nrf54CslDebugParentRxFromPsdu(receivedFrame->mPsdu, receivedFrame->mLength, receivedFrame->mChannel,
+                                      (uint32_t)receivedFrame->mInfo.mRxInfo.mTimestamp,
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+                                      receivedFrame->mInfo.mRxInfo.mAckedWithSecEnhAck
+#else
+                                      false
+#endif
+        );
+    }
+#endif
+
     otSysEventSignalPending();
 }
 
@@ -1417,6 +1446,7 @@ void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
     if (id == DRX_SLOT_RX && error == NRF_802154_RX_ERROR_DELAYED_TIMEOUT)
     {
         g_nrf54_debug_stats.csl_drx_timeout_enter++;
+        nrf54CslDebugPlatDrxTimeout();
 
         sAckedWithFramePending = false;
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
@@ -1785,6 +1815,8 @@ otError otPlatRadioEnableCsl(otInstance         *aInstance,
                              const otExtAddress *aExtAddr)
 {
     sCslPeriod = aCslPeriod;
+
+    nrf54CslDebugSetCslPeerShort(aShortAddr);
 
     /* CSL-F1-BEGIN: hold HFCLK between CSL windows (revert F1: remove block through CSL-F1-END) */
     if (aCslPeriod > 0)
