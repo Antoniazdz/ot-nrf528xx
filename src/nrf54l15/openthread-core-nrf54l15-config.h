@@ -93,10 +93,9 @@
 #define OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AHEAD 104
 #endif
 
-/* CSL-P0-LT: extra margin for main-loop latency before RSCH schedule (~320 default
- * gives ~253 µs effective lead; 512 → ~445 µs platform / ~255 µs trigger warm). */
+/* Parity nRF52840: lead time for SubMac to call ReceiveAt before winStart (hw_task + main loop). */
 #ifndef OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD
-#define OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD 512
+#define OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD 2000
 #endif
 
 #ifndef OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER
