@@ -22,6 +22,7 @@ target_include_directories(nrf-802154-platform
 
 set(NRF54_PLATFORM_SOURCES
     nrf54_debug_stats.c
+    nrf54_csl_debug.c
     platform_gppi_nrf54l.c
     nrf_802154_clock_platform.c
     nrf_802154_clock_callbacks.c
@@ -41,6 +42,8 @@ endif()
 target_sources(nrf-802154-platform PRIVATE ${NRF54_PLATFORM_SOURCES})
 
 target_compile_definitions(nrf-802154-platform
+    PUBLIC
+        NRF54_DEBUG_STATS=1
     PRIVATE
         NRF54_LPTIMER_CC2_ONLY_BISECT=0
         NRF54_LPTIMER_CC2_STUB_BISECT=0

@@ -291,6 +291,35 @@ typedef struct
     uint32_t last_csl_phase;                 /* returned phase (ten-symbols + 1) */
     uint32_t update_csl_sample_time_enter;
     uint32_t last_update_csl_sample_time;    /* arg to otPlatRadioUpdateCslSampleTime */
+
+    /* CSL phase verification (nrf54_csl_debug.c) — proves/fixes phase-sync hypothesis. */
+    uint32_t last_csl_win_phase_us;          /* win_start % period at last plat ReceiveAt */
+    uint32_t last_csl_ot_win_phase_us;       /* win_start % period at last OT HandleCslReceiveAt */
+    uint32_t last_csl_init_phase_us;         /* GetNow-based phase at SetCslParams */
+    uint32_t last_csl_init_sample_time_radio;
+    uint32_t last_parent_rx_phase_us;        /* parent RX timestamp % period */
+    uint32_t last_csl_phase_gap_us;          /* circular |win_phase - parent_rx_phase| */
+    uint32_t last_csl_sync_timestamp_us;     /* mCslLastSync equivalent at last RX sync */
+    uint32_t last_csl_timeout_win_phase_us;  /* win phase at last DRX timeout */
+    uint32_t last_csl_timeout_phase_gap_us;  /* gap vs last known parent_rx_phase at timeout */
+    uint32_t last_csl_win_end_us;            /* win_start + duration (32-bit radio time) */
+    uint32_t last_csl_period_us;             /* CSL period in us (ten_symbols * 160) */
+    uint32_t csl_set_csl_params_enter;
+    uint32_t csl_sync_from_rx_enter;         /* UpdateCslLastSyncTimestamp RX + SecEnhAck */
+    uint32_t csl_sync_from_rx_no_enh_ack;    /* parent RX without SecEnhAck (no OT sync) */
+    uint32_t csl_sync_from_tx_ack;           /* UpdateCslLastSyncTimestamp TX ACK path */
+    uint32_t csl_rx_from_parent_total;
+    uint32_t csl_rx_from_parent_csl_ch;      /* parent RX on last CSL channel */
+    uint32_t csl_rx_from_parent_in_window;   /* parent RX timestamp inside last plat CSL window */
+    uint32_t csl_rx_from_parent_outside_window;
+    uint32_t csl_drx_timeout_likely_phase;   /* timeout while last phase_gap > win_duration */
+    uint32_t last_csl_peer_short;            /* parent short addr from EnableCsl */
+
+    /* Platform CSL phase correction (radio_nrf54.c) — sync DRX window to parent grid. */
+    uint32_t csl_plat_sync_from_parent_rx;       /* first parent RX established phase anchor */
+    uint32_t csl_plat_receive_at_phase_corrected; /* ReceiveAt winStart shifted to parent phase */
+    uint32_t last_csl_plat_phase_shift_us;        /* |shift| applied to last ReceiveAt */
+    uint32_t last_csl_plat_win_start_corrected;   /* winStart after platform phase shift */
 } nrf54_debug_stats_t;
 
 extern volatile nrf54_debug_stats_t g_nrf54_debug_stats;
