@@ -22,8 +22,6 @@ target_include_directories(nrf-802154-platform
 
 set(NRF54_PLATFORM_SOURCES
     nrf54_debug_stats.c
-    nrf54_debug_stats_clock.c
-    nrf54_csl_debug.c
     platform_gppi_nrf54l.c
     nrf_802154_clock_platform.c
     nrf_802154_clock_callbacks.c

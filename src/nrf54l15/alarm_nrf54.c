@@ -330,10 +330,6 @@
     nrfx_grtc_active_request_set(true);
     #endif
      OtGrtcChannelsInit();
-
-#ifdef NRF54_DEBUG_STATS
-    nrf54DebugStatsClockSample();
-#endif
  }
  
  void nrf5AlarmDeinit(void)
@@ -352,9 +348,6 @@ bool nrf5AlarmIsPending(void)
 
  void nrf5AlarmProcess(otInstance *aInstance)
  {
-#ifdef NRF54_DEBUG_STATS
-     nrf54DebugStatsClockSample();
-#endif
      do
      {
          sEventPending = false;

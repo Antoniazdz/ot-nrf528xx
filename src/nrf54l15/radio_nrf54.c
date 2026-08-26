@@ -67,7 +67,6 @@
 #include "platform/nrf_802154_clock.h"
 
 #include "nrf54_debug_stats.h"
-#include "nrf54_csl_debug.h"
 
 #include <openthread/random_noncrypto.h>
 
@@ -637,7 +636,6 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
     g_nrf54_debug_stats.last_csl_start_minus_now_us           = aStart - nowUs;
     g_nrf54_debug_stats.last_driver_state_at_csl_receive_at   = (uint32_t)sDriverState;
     g_nrf54_debug_stats.last_rx_on_when_idle_at_csl_receive_at = sRxOnWhenIdle ? 1U : 0U;
-    nrf54DebugStatsClockSample();
 
     if (leadUs < 0)
     {
@@ -681,13 +679,6 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
 
     result = nrf_802154_receive_at(rxTime, rxDuration, aChannel, DRX_SLOT_RX);
     clearPendingEvents();
-
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-    if (sCslPeriod > 0U)
-    {
-        nrf54CslDebugPlatReceiveAt(aChannel, aStart, aDuration, (uint16_t)sCslPeriod);
-    }
-#endif
 
     if (result)
     {
@@ -1318,20 +1309,6 @@ void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lq
     sAckedWithSecEnhAck = false;
 #endif
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-    if (sCslPeriod > 0U)
-    {
-        nrf54CslDebugParentRxFromPsdu(receivedFrame->mPsdu, receivedFrame->mLength, receivedFrame->mChannel,
-                                      (uint32_t)receivedFrame->mInfo.mRxInfo.mTimestamp,
-#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-                                      receivedFrame->mInfo.mRxInfo.mAckedWithSecEnhAck
-#else
-                                      false
-#endif
-        );
-    }
-#endif
-
     otSysEventSignalPending();
 }
 
@@ -1341,7 +1318,6 @@ void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
     if (id == DRX_SLOT_RX && error == NRF_802154_RX_ERROR_DELAYED_TIMEOUT)
     {
         g_nrf54_debug_stats.csl_drx_timeout_enter++;
-        nrf54CslDebugPlatDrxTimeout();
 
         sAckedWithFramePending = false;
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
@@ -1719,8 +1695,6 @@ otError otPlatRadioEnableCsl(otInstance         *aInstance,
                              const otExtAddress *aExtAddr)
 {
     sCslPeriod = aCslPeriod;
-
-    nrf54CslDebugSetCslPeerShort(aShortAddr);
 
     /* CSL-F1-BEGIN: hold HFCLK between CSL windows (revert F1: remove block through CSL-F1-END) */
     if (aCslPeriod > 0)

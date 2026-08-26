@@ -70,18 +70,6 @@ typedef struct
     uint32_t tx_fail_busy_channel;
     uint32_t hfclk_ready_calls;
     uint32_t hfclk_latency_set_calls; /* unused (legacy CSL-F1 counter) */
-    uint32_t hfclk_start_calls;
-    uint32_t hfclk_stop_calls;
-    uint32_t hfclk_xo_stop_calls;        /* nrfx_clock_xo_stop / hfclk_drv_stop invoked */
-    uint32_t hfclk_users_min;            /* minimum mHfclkUsers seen (0 => XO ref reached 0) */
-    uint32_t last_hfclk_users;
-    uint32_t hfclk_not_running_samples;  /* sample: nrf_802154_clock_hfclk_is_running() false */
-
-    uint32_t grtc_clock_sample_checks;
-    uint32_t grtc_not_active_request_samples; /* sample: nrfx_grtc_active_request_check() false */
-    uint32_t grtc_not_ready_samples;          /* sample: nrfx_grtc_ready_check() false */
-    uint32_t last_grtc_active_request;        /* snapshot 0/1 */
-    uint32_t last_grtc_ready;                 /* snapshot 0/1 */
 
     uint32_t csl_alarm_process_early; /* CSL-F4.1: nrf54ProcessMainLoop early alarm */
 
@@ -152,19 +140,6 @@ typedef struct
     uint32_t last_csl_receive_at_arg_start;
     uint32_t last_grtc_at_csl_receive_at;
 
-    /* OpenThread SubMac CSL path (sub_mac_csl_receiver.cpp). */
-    uint32_t csl_handle_csl_timer_enter;
-    uint32_t csl_handle_csl_receive_at_enter;
-    uint32_t csl_receive_at_ot_called;          /* Radio::ReceiveAt actually invoked */
-    uint32_t csl_skip_submac_disabled;
-    uint32_t csl_skip_submac_receive;           /* mState == kStateReceive — main skip */
-    uint32_t csl_receive_at_called_during_tx;   /* called while CsmaBackoff/Transmit */
-    uint32_t csl_ot_win_in_past;                /* winStart < now at OT schedule time */
-    uint32_t csl_ot_win_lead_short;             /* 0 <= lead < 400 us */
-    uint32_t csl_ot_win_lead_ok;                /* lead >= 400 us */
-    uint32_t last_csl_submac_state;             /* SubMac::State at last HandleCslReceiveAt */
-    uint32_t last_csl_ot_win_start_minus_now_us; /* signed lead, bit pattern (int32) */
-
     /* OT micro alarm (CSL mCslTimer, alarm_nrf54.c). */
     uint32_t ot_us_alarm_compare_match;
     uint32_t ot_us_alarm_fired;
@@ -200,6 +175,17 @@ typedef struct
     uint32_t last_tx_immediate_error;
     uint32_t last_driver_error;
     uint32_t last_ack_present;
+
+    /* nRF52 model: counter inject in otPlatRadioTransmit, AES-CCM in nrf_802154_tx_started. */
+    uint32_t tx_counter_inject;              /* KeyId + frame counter set before driver TX */
+    uint32_t tx_late_encrypt_hook_enter;     /* nrf_802154_tx_started calls */
+    uint32_t tx_late_encrypt;                /* otMacFrameProcessTransmitAesCcm executed */
+    uint32_t tx_late_encrypt_ping;           /* late encrypt on ping-sized frame */
+    uint32_t tx_late_encrypt_skip_processed; /* skipped: mIsSecurityProcessed already set */
+    uint32_t tx_late_encrypt_skip_not_secured; /* skipped: not secured KeyIdMode1 */
+
+    uint32_t last_tx_counter_injected;       /* snapshot: last TX injected frame counter */
+    uint32_t last_tx_late_encrypted;         /* snapshot: last TX late-encrypted in hook */
 
     /* Sleepy-child lifecycle (RxOnWhenIdle / CSL window gaps). */
     uint32_t radio_auto_sleep_enter;
@@ -284,42 +270,16 @@ typedef struct
     uint32_t last_hw_task_cc_at_update_ppi;
     uint32_t hw_task_update_ppi_cc_already_triggered;
 
+    /* getCslPhase() — snapshot sCslSampleTime value at each call (radio_nrf54.c). */
+    uint32_t get_csl_phase_enter;
+    uint32_t get_csl_phase_sample_time_zero; /* sCslSampleTime == 0 at getCslPhase() */
+    uint32_t last_sCslSampleTime_at_phase;   /* raw value passed into line 1492 */
+    uint32_t last_csl_phase_diff_us;
+    uint32_t last_csl_phase;                 /* returned phase (ten-symbols + 1) */
     uint32_t update_csl_sample_time_enter;
     uint32_t last_update_csl_sample_time;    /* arg to otPlatRadioUpdateCslSampleTime */
-
-    /* CSL phase verification (nrf54_csl_debug.c) — proves/fixes phase-sync hypothesis. */
-    uint32_t last_csl_win_phase_us;          /* win_start % period at last plat ReceiveAt */
-    uint32_t last_csl_ot_win_phase_us;       /* win_start % period at last OT HandleCslReceiveAt */
-    uint32_t last_csl_init_phase_us;         /* GetNow-based phase at SetCslParams */
-    uint32_t last_csl_init_sample_time_radio;
-    uint32_t last_parent_rx_phase_us;        /* parent RX timestamp % period */
-    uint32_t last_csl_phase_gap_us;          /* circular |win_phase - parent_rx_phase| */
-    uint32_t last_csl_sync_timestamp_us;     /* mCslLastSync equivalent at last RX sync */
-    uint32_t last_csl_timeout_win_phase_us;  /* win phase at last DRX timeout */
-    uint32_t last_csl_timeout_phase_gap_us;  /* gap vs last known parent_rx_phase at timeout */
-    uint32_t last_csl_win_end_us;            /* win_start + duration (32-bit radio time) */
-    uint32_t last_csl_period_us;             /* CSL period in us (ten_symbols * 160) */
-    uint32_t csl_set_csl_params_enter;
-    uint32_t csl_sync_from_rx_enter;         /* UpdateCslLastSyncTimestamp RX + SecEnhAck */
-    uint32_t csl_sync_from_rx_no_enh_ack;    /* parent RX without SecEnhAck (no OT sync) */
-    uint32_t csl_sync_from_tx_ack;           /* UpdateCslLastSyncTimestamp TX ACK path */
-    uint32_t csl_rx_from_parent_total;
-    uint32_t csl_rx_from_parent_csl_ch;      /* parent RX on last CSL channel */
-    uint32_t csl_rx_from_parent_in_window;   /* parent RX timestamp inside last plat CSL window */
-    uint32_t csl_rx_from_parent_outside_window;
-    uint32_t csl_drx_timeout_likely_phase;   /* timeout while last phase_gap > win_duration */
-    uint32_t last_csl_peer_short;            /* parent short addr from EnableCsl */
-
-    /* Platform CSL phase correction (radio_nrf54.c) — sync DRX window to parent grid. */
-    uint32_t csl_plat_sync_from_parent_rx;       /* first parent RX established phase anchor */
-    uint32_t csl_plat_receive_at_phase_corrected; /* ReceiveAt winStart shifted to parent phase */
-    uint32_t last_csl_plat_phase_shift_us;        /* |shift| applied to last ReceiveAt */
-    uint32_t last_csl_plat_win_start_corrected;   /* winStart after platform phase shift */
 } nrf54_debug_stats_t;
 
 extern volatile nrf54_debug_stats_t g_nrf54_debug_stats;
-
-/** Sample HFCLK/GRTC running state (OT_GRTC_ALWAYS_ON / OT_HFCLK_ALWAYS_ON checks). */
-void nrf54DebugStatsClockSample(void);
 
 #endif /* NRF54_DEBUG_STATS_H_ */

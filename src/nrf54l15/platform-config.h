@@ -157,8 +157,8 @@
  * When set, nrf5AlarmInit() starts XO/HFCLK before GRTC syscounter and holds
  * one ref-count (+1) for the lifetime of the firmware.
  */
-#ifndef OT_HFCLK_ALWAYS_ON
+/*#ifndef OT_HFCLK_ALWAYS_ON
 #define OT_HFCLK_ALWAYS_ON 1
 #endif
-
+*/
 #endif // PLATFORM_CONFIG_H_

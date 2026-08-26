@@ -11,6 +11,7 @@
 #include <nrfx.h>
 
 #include "nrf_802154_clock.h"
+#include "nrf_802154_utils.h"
 
 /* Matches PREC_HFXO_STARTUP_TIME_WORST in nrf_802154_rsch.c for NRF54L_SERIES. */
 #define RAAL_HFCLK_WAIT_US 2000U
@@ -36,7 +37,7 @@ static bool hfclk_wait_until_running(void)
 
     for (uint32_t waited = 0; waited < RAAL_HFCLK_WAIT_US; waited++)
     {
-        nrfx_coredep_delay_us(1);
+        nrf_802154_delay_us(1);
         if (nrf_802154_clock_hfclk_is_running())
         {
             return true;
