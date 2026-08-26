@@ -69,7 +69,7 @@ typedef struct
 
     uint32_t tx_fail_busy_channel;
     uint32_t hfclk_ready_calls;
-    uint32_t hfclk_latency_set_calls; /* CSL-F1: hfclk_warm_latency_apply() */
+    uint32_t hfclk_latency_set_calls; /* unused (legacy CSL-F1 counter) */
 
     uint32_t csl_alarm_process_early; /* CSL-F4.1: nrf54ProcessMainLoop early alarm */
 
