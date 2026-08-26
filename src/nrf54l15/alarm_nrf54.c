@@ -304,11 +304,19 @@
      nrf_802154_clock_init();
      nrf_802154_clock_lfclk_start();
  
-     while (!nrf_802154_clock_lfclk_is_running())
-     {
-     }
- 
-     if (!nrfx_grtc_init_check())
+    while (!nrf_802154_clock_lfclk_is_running())
+    {
+    }
+
+#if OT_HFCLK_ALWAYS_ON
+    nrf_802154_clock_hfclk_start();
+
+    while (!nrf_802154_clock_hfclk_is_running())
+    {
+    }
+#endif
+
+    if (!nrfx_grtc_init_check())
      {
         int err;
 
@@ -318,7 +326,14 @@
      }
 
      GrtcSyscounterEnsureStarted();
+     #if OT_GRTC_ALWAYS_ON
+    nrfx_grtc_active_request_set(true);
+    #endif
      OtGrtcChannelsInit();
+
+#ifdef NRF54_DEBUG_STATS
+    nrf54DebugStatsClockSample();
+#endif
  }
  
  void nrf5AlarmDeinit(void)
@@ -337,6 +352,9 @@ bool nrf5AlarmIsPending(void)
 
  void nrf5AlarmProcess(otInstance *aInstance)
  {
+#ifdef NRF54_DEBUG_STATS
+     nrf54DebugStatsClockSample();
+#endif
      do
      {
          sEventPending = false;

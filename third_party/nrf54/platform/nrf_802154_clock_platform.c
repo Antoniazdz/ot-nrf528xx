@@ -37,6 +37,33 @@ static uint8_t mHfclkUsers;
 /* CSL-F1-BEGIN: warm XO → RSCH m_prec_ramp_up ≈ 152 µs (revert F1: remove block through CSL-F1-END) */
 static bool    mHfclkLatencySet;
 
+#ifdef NRF54_DEBUG_STATS
+static void hfclk_users_track(void)
+{
+    g_nrf54_debug_stats.last_hfclk_users = mHfclkUsers;
+
+    if (g_nrf54_debug_stats.hfclk_start_calls == 0U)
+    {
+        g_nrf54_debug_stats.hfclk_users_min = mHfclkUsers;
+    }
+    else if (mHfclkUsers < g_nrf54_debug_stats.hfclk_users_min)
+    {
+        g_nrf54_debug_stats.hfclk_users_min = mHfclkUsers;
+    }
+}
+
+static void hfclk_ready_notify(void)
+{
+    g_nrf54_debug_stats.hfclk_ready_calls++;
+    nrf_802154_clock_hfclk_ready();
+}
+#else
+static void hfclk_ready_notify(void)
+{
+    nrf_802154_clock_hfclk_ready();
+}
+#endif
+
 static void hfclk_warm_latency_apply(void)
 {
     if (!mHfclkLatencySet)
@@ -62,7 +89,7 @@ static void lfclk_evt_handler(nrfx_clock_lfclk_evt_type_t event)
 
 static void hfclk_evt_handler(void)
 {
-    nrf_802154_clock_hfclk_ready();
+    hfclk_ready_notify();
     hfclk_warm_latency_apply(); /* CSL-F1 */
 }
 
@@ -110,7 +137,7 @@ static void xo_evt_handler(nrfx_clock_xo_event_type_t event)
 {
     if (event == NRFX_CLOCK_XO_EVT_HFCLK_STARTED)
     {
-        nrf_802154_clock_hfclk_ready();
+        hfclk_ready_notify();
         hfclk_warm_latency_apply(); /* CSL-F1 */
     }
 }
@@ -191,11 +218,14 @@ void nrf_802154_clock_deinit(void)
 void nrf_802154_clock_hfclk_start(void)
 {
     if (mHfclkUsers == UINT8_MAX) { return; }
+#ifdef NRF54_DEBUG_STATS
+    g_nrf54_debug_stats.hfclk_start_calls++;
+#endif
     if (mHfclkUsers++ == 0)
     {
         if (hfclk_running_check())
         {
-            nrf_802154_clock_hfclk_ready();
+            hfclk_ready_notify();
             hfclk_warm_latency_apply(); /* CSL-F1 */
         }
         else
@@ -205,21 +235,32 @@ void nrf_802154_clock_hfclk_start(void)
     }
     else if (hfclk_running_check())
     {
-        nrf_802154_clock_hfclk_ready();
+        hfclk_ready_notify();
         hfclk_warm_latency_apply(); /* CSL-F1 */
     }
+#ifdef NRF54_DEBUG_STATS
+    hfclk_users_track();
+#endif
 }
 
 void nrf_802154_clock_hfclk_stop(void)
 {
-    
+#ifdef NRF54_DEBUG_STATS
+    g_nrf54_debug_stats.hfclk_stop_calls++;
+#endif
     if ((mHfclkUsers > 0) && (--mHfclkUsers == 0))
     {
         if (hfclk_running_check())
         {
+#ifdef NRF54_DEBUG_STATS
+            g_nrf54_debug_stats.hfclk_xo_stop_calls++;
+#endif
             hfclk_drv_stop();
         }
     }
+#ifdef NRF54_DEBUG_STATS
+    hfclk_users_track();
+#endif
 }
 
 bool nrf_802154_clock_hfclk_is_running(void)

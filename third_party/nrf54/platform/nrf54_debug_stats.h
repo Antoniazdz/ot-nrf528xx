@@ -70,6 +70,18 @@ typedef struct
     uint32_t tx_fail_busy_channel;
     uint32_t hfclk_ready_calls;
     uint32_t hfclk_latency_set_calls; /* CSL-F1: hfclk_warm_latency_apply() */
+    uint32_t hfclk_start_calls;
+    uint32_t hfclk_stop_calls;
+    uint32_t hfclk_xo_stop_calls;        /* nrfx_clock_xo_stop / hfclk_drv_stop invoked */
+    uint32_t hfclk_users_min;            /* minimum mHfclkUsers seen (0 => XO ref reached 0) */
+    uint32_t last_hfclk_users;
+    uint32_t hfclk_not_running_samples;  /* sample: nrf_802154_clock_hfclk_is_running() false */
+
+    uint32_t grtc_clock_sample_checks;
+    uint32_t grtc_not_active_request_samples; /* sample: nrfx_grtc_active_request_check() false */
+    uint32_t grtc_not_ready_samples;          /* sample: nrfx_grtc_ready_check() false */
+    uint32_t last_grtc_active_request;        /* snapshot 0/1 */
+    uint32_t last_grtc_ready;                 /* snapshot 0/1 */
 
     uint32_t csl_alarm_process_early; /* CSL-F4.1: nrf54ProcessMainLoop early alarm */
 
@@ -189,17 +201,6 @@ typedef struct
     uint32_t last_driver_error;
     uint32_t last_ack_present;
 
-    /* nRF52 model: counter inject in otPlatRadioTransmit, AES-CCM in nrf_802154_tx_started. */
-    uint32_t tx_counter_inject;              /* KeyId + frame counter set before driver TX */
-    uint32_t tx_late_encrypt_hook_enter;     /* nrf_802154_tx_started calls */
-    uint32_t tx_late_encrypt;                /* otMacFrameProcessTransmitAesCcm executed */
-    uint32_t tx_late_encrypt_ping;           /* late encrypt on ping-sized frame */
-    uint32_t tx_late_encrypt_skip_processed; /* skipped: mIsSecurityProcessed already set */
-    uint32_t tx_late_encrypt_skip_not_secured; /* skipped: not secured KeyIdMode1 */
-
-    uint32_t last_tx_counter_injected;       /* snapshot: last TX injected frame counter */
-    uint32_t last_tx_late_encrypted;         /* snapshot: last TX late-encrypted in hook */
-
     /* Sleepy-child lifecycle (RxOnWhenIdle / CSL window gaps). */
     uint32_t radio_auto_sleep_enter;
     uint32_t radio_auto_sleep_ok;
@@ -283,12 +284,6 @@ typedef struct
     uint32_t last_hw_task_cc_at_update_ppi;
     uint32_t hw_task_update_ppi_cc_already_triggered;
 
-    /* getCslPhase() — snapshot sCslSampleTime value at each call (radio_nrf54.c). */
-    uint32_t get_csl_phase_enter;
-    uint32_t get_csl_phase_sample_time_zero; /* sCslSampleTime == 0 at getCslPhase() */
-    uint32_t last_sCslSampleTime_at_phase;   /* raw value passed into line 1492 */
-    uint32_t last_csl_phase_diff_us;
-    uint32_t last_csl_phase;                 /* returned phase (ten-symbols + 1) */
     uint32_t update_csl_sample_time_enter;
     uint32_t last_update_csl_sample_time;    /* arg to otPlatRadioUpdateCslSampleTime */
 
@@ -323,5 +318,8 @@ typedef struct
 } nrf54_debug_stats_t;
 
 extern volatile nrf54_debug_stats_t g_nrf54_debug_stats;
+
+/** Sample HFCLK/GRTC running state (OT_GRTC_ALWAYS_ON / OT_HFCLK_ALWAYS_ON checks). */
+void nrf54DebugStatsClockSample(void);
 
 #endif /* NRF54_DEBUG_STATS_H_ */
