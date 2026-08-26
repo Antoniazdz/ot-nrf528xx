@@ -69,8 +69,6 @@
 #include "nrf54_debug_stats.h"
 #include "nrf54_csl_debug.h"
 
-#include <openthread-core-config.h>
-#include <openthread/config.h>
 #include <openthread/random_noncrypto.h>
 
 // clang-format off
@@ -106,7 +104,6 @@ static otRadioFrame sTransmitFrame;
 static uint8_t      sTransmitPsdu[OT_RADIO_FRAME_MAX_SIZE + 1];
 
 #if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
-static otExtAddress  sExtAddress;
 static otRadioIeInfo sTransmitIeInfo;
 static otInstance   *sInstance = NULL;
 #endif
@@ -129,7 +126,7 @@ static uint32_t      sCslSampleTime;
 static bool          sCslHfclkHeld; /* CSL-F1: HFCLK ref-count while CSL active */
 static const uint8_t sCslIeHeader[OT_IE_HEADER_SIZE] = {CSL_IE_HEADER_BYTES_LO, CSL_IE_HEADER_BYTES_HI};
 
-static uint16_t getCslPhase(void);
+
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 
 typedef enum
@@ -147,15 +144,10 @@ static uint32_t sPendingEvents;
 static bool     sRxOnWhenIdle = true;
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-static uint32_t         sMacFrameCounter;
-static uint32_t         sPrevMacFrameCounter;
-static uint8_t          sKeyId;
-static otMacKeyMaterial sPrevKey;
-static otMacKeyMaterial sCurrKey;
-static otMacKeyMaterial sNextKey;
-static bool             sAckedWithSecEnhAck;
-static uint32_t         sAckFrameCounter;
-static uint8_t          sAckKeyId;
+static uint32_t sMacFrameCounter;
+static bool     sAckedWithSecEnhAck;
+static uint32_t sAckFrameCounter;
+static uint8_t  sAckKeyId;
 #endif
 
 static inline void SetRadioDriverState(nrf_802154_state_t aState)
@@ -245,8 +237,7 @@ static void dataInit(void)
 
     memset(&sAckFrame, 0, sizeof(sAckFrame));
 
-    sPrevMacFrameCounter = 0;
-    sRxOnWhenIdle        = true;
+    sRxOnWhenIdle = true;
 
     SetRadioDriverState(NRF_802154_STATE_SLEEP);
 }
@@ -435,62 +426,6 @@ static void nrf54DebugRecordTxImmediateFail(radio_state_t         aDriverStateBe
     }
 }
 
-#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-static void txAckProcessSecurity(uint8_t *aAckFrame)
-{
-    otRadioFrame      ackFrame;
-    otMacKeyMaterial *key = NULL;
-    uint8_t           keyId;
-
-    sAckedWithSecEnhAck = false;
-    otEXPECT(aAckFrame[SECURITY_ENABLED_OFFSET] & SECURITY_ENABLED_BIT);
-
-    memset(&ackFrame, 0, sizeof(ackFrame));
-    ackFrame.mPsdu   = &aAckFrame[1];
-    ackFrame.mLength = aAckFrame[0];
-
-    keyId = otMacFrameGetKeyId(&ackFrame);
-
-    otEXPECT(otMacFrameIsKeyIdMode1(&ackFrame) && keyId != 0);
-
-    if (keyId == sKeyId)
-    {
-        key              = &sCurrKey;
-        sAckFrameCounter = sMacFrameCounter++;
-    }
-    else if (keyId == sKeyId - 1)
-    {
-        key              = &sPrevKey;
-        sAckFrameCounter = sPrevMacFrameCounter++;
-    }
-    else if (keyId == sKeyId + 1)
-    {
-        key = &sNextKey;
-        // Openthread does not maintain future frame counter.
-        // Mac frame counter would be overwritten after key rotation leading to
-        // frames being dropped due to counter value lower than in acks.
-        sAckFrameCounter = 0;
-    }
-    else
-    {
-        otEXPECT(false);
-    }
-
-    sAckKeyId           = keyId;
-    sAckedWithSecEnhAck = true;
-
-    ackFrame.mInfo.mTxInfo.mAesKey = key;
-
-    otMacFrameSetKeyId(&ackFrame, keyId);
-    otMacFrameSetFrameCounter(&ackFrame, sAckFrameCounter);
-
-    otMacFrameProcessTransmitAesCcm(&ackFrame, &sExtAddress);
-
-exit:
-    return;
-}
-#endif // OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-
 #if !OPENTHREAD_CONFIG_ENABLE_PLATFORM_EUI64_CUSTOM_SOURCE
 void otPlatRadioGetIeeeEui64(otInstance *aInstance, uint8_t *aIeeeEui64)
 {
@@ -524,12 +459,7 @@ void otPlatRadioSetPanId(otInstance *aInstance, uint16_t aPanId)
 void otPlatRadioSetExtendedAddress(otInstance *aInstance, const otExtAddress *aExtAddress)
 {
     OT_UNUSED_VARIABLE(aInstance);
-#if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
-    for (size_t i = 0; i < sizeof(*aExtAddress); i++)
-    {
-        sExtAddress.m8[i] = aExtAddress->m8[sizeof(*aExtAddress) - 1 - i];
-    }
-#endif
+
     nrf_802154_extended_address_set(aExtAddress->m8);
 }
 
@@ -676,7 +606,6 @@ otError otPlatRadioReceive(otInstance *aInstance, uint8_t aChannel)
     return result ? OT_ERROR_NONE : OT_ERROR_INVALID_STATE;
 }
 
-#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
 static uint64_t unwrapFutureRadioTimeUs(uint32_t aTimeUs)
 {
     uint64_t nowUs = otPlatTimeGet();
@@ -685,6 +614,7 @@ static uint64_t unwrapFutureRadioTimeUs(uint32_t aTimeUs)
     return nowUs + (int32_t)(aTimeUs - (uint32_t)nowUs);
 }
 
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
 otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t aStart, uint32_t aDuration)
 {
     OT_UNUSED_VARIABLE(aInstance);
@@ -707,6 +637,7 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
     g_nrf54_debug_stats.last_csl_start_minus_now_us           = aStart - nowUs;
     g_nrf54_debug_stats.last_driver_state_at_csl_receive_at   = (uint32_t)sDriverState;
     g_nrf54_debug_stats.last_rx_on_when_idle_at_csl_receive_at = sRxOnWhenIdle ? 1U : 0U;
+    nrf54DebugStatsClockSample();
 
     if (leadUs < 0)
     {
@@ -772,17 +703,8 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
 #endif
 
 #if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
-static void nrf54ProcessTransmitSecurity(otRadioFrame *aFrame)
+static void nrf54ProcessTimeSyncIe(otRadioFrame *aFrame)
 {
-    bool processSecurity = false;
-
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-    if ((sCslPeriod > 0) && !aFrame->mInfo.mTxInfo.mIsARetx)
-    {
-        otMacFrameSetCslIe(aFrame, (uint16_t)sCslPeriod, getCslPhase());
-    }
-#endif
-
 #if OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
     if (aFrame->mInfo.mTxInfo.mIeInfo->mTimeIeOffset != 0)
     {
@@ -797,32 +719,8 @@ static void nrf54ProcessTransmitSecurity(otRadioFrame *aFrame)
             time        = time >> 8;
             *(++timeIe) = (uint8_t)(time & 0xff);
         }
-
-        processSecurity = true;
     }
 #endif // OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
-
-#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-    otEXPECT(otMacFrameIsSecurityEnabled(aFrame) && otMacFrameIsKeyIdMode1(aFrame) &&
-             !aFrame->mInfo.mTxInfo.mIsSecurityProcessed);
-
-    aFrame->mInfo.mTxInfo.mAesKey = &sCurrKey;
-    processSecurity               = true;
-#endif // OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-
-    otEXPECT(processSecurity);
-    g_nrf54_debug_stats.tx_late_encrypt++;
-    g_nrf54_debug_stats.last_tx_late_encrypted = 1U;
-
-    if (nrf54DebugIsPingSizedTx(aFrame))
-    {
-        g_nrf54_debug_stats.tx_late_encrypt_ping++;
-    }
-
-    otMacFrameProcessTransmitAesCcm(aFrame, &sExtAddress);
-
-exit:
-    return;
 }
 #endif // OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
 
@@ -838,10 +736,17 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
     g_nrf54_debug_stats.last_tx_max_backoffs    = aFrame->mInfo.mTxInfo.mMaxCsmaBackoffs;
     g_nrf54_debug_stats.last_tx_immediate_error = NRF_802154_TX_ERROR_NONE;
     g_nrf54_debug_stats.last_ack_present        = 0;
-    g_nrf54_debug_stats.last_tx_counter_injected = 0U;
-    g_nrf54_debug_stats.last_tx_late_encrypted   = 0U;
 
     aFrame->mPsdu[-1] = aFrame->mLength;
+
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+    nrf_802154_transmitted_frame_props_t frameProps = {
+        .is_secured          = aFrame->mInfo.mTxInfo.mIsSecurityProcessed,
+        .dynamic_data_is_set = aFrame->mInfo.mTxInfo.mIsHeaderUpdated,
+    };
+#else
+    nrf_802154_transmitted_frame_props_t frameProps = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT;
+#endif
 
     if (IsRadioDriverStateSleep())
     {
@@ -850,25 +755,15 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
     }
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-    if (otMacFrameIsSecurityEnabled(aFrame) && otMacFrameIsKeyIdMode1(aFrame) && !aFrame->mInfo.mTxInfo.mIsARetx)
-    {
-        otMacFrameSetKeyId(aFrame, sKeyId);
-        otMacFrameSetFrameCounter(aFrame, sMacFrameCounter++);
-        g_nrf54_debug_stats.tx_counter_inject++;
-        g_nrf54_debug_stats.last_tx_counter_injected = 1U;
-    }
-
 #if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
-    /* nRF54 driver never calls nrf_802154_tx_started(); encrypt before driver TX (nRF52 model). */
-    nrf54ProcessTransmitSecurity(aFrame);
+    nrf54ProcessTimeSyncIe(aFrame);
 #endif
-
 
     if (aFrame->mInfo.mTxInfo.mTxDelay != 0)
     {
 #if NRF_802154_DELAYED_TRX_ENABLED
         nrf_802154_transmit_at_metadata_t atMetadata = {
-            .frame_props         = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT,
+            .frame_props         = frameProps,
             .cca                 = true,
             .channel             = aFrame->mChannel,
             .tx_power            = {.use_metadata_value = false},
@@ -891,7 +786,7 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
         if (aFrame->mInfo.mTxInfo.mCsmaCaEnabled)
         {
             nrf_802154_transmit_csma_ca_metadata_t csmaMetadata = {
-                .frame_props         = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT,
+                .frame_props         = frameProps,
                 .tx_power            = {.use_metadata_value = false},
                 .tx_channel          = {.use_metadata_value = true, .channel = aFrame->mChannel},
                 .tx_timestamp_encode = false,
@@ -920,7 +815,7 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
              * transmit_raw() must not honor mCsmaCaEnabled — OT sets it true for
              * data/MLE even when CSMA_CA_ENABLED=0, which caused TxErrCca storms. */
             nrf_802154_transmit_metadata_t metadata = {
-                .frame_props         = NRF_802154_TRANSMITTED_FRAME_PROPS_DEFAULT_INIT,
+                .frame_props         = frameProps,
                 .cca                 = false,
                 .tx_power            = {.use_metadata_value = false},
                 .tx_channel          = {.use_metadata_value = false},
@@ -1515,63 +1410,38 @@ void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
     }
 }
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-static uint16_t getCslPhase(void)
+
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+static void nrf54UpdateTxFrameInfo(const nrf_802154_transmit_done_metadata_t *aMetadata)
 {
-    uint32_t curTime       = otPlatAlarmMicroGetNow();
-    uint32_t cslPeriodInUs = sCslPeriod * OT_US_PER_TEN_SYMBOLS;
-    uint32_t diff = (cslPeriodInUs - (curTime % cslPeriodInUs) + (sCslSampleTime % cslPeriodInUs)) % cslPeriodInUs;
-    uint16_t phase = (uint16_t)(diff / OT_US_PER_TEN_SYMBOLS + 1);
-
-    g_nrf54_debug_stats.get_csl_phase_enter++;
-    g_nrf54_debug_stats.last_sCslSampleTime_at_phase = sCslSampleTime;
-    g_nrf54_debug_stats.last_csl_phase_diff_us       = diff;
-    g_nrf54_debug_stats.last_csl_phase               = phase;
-    if (sCslSampleTime == 0U)
-    {
-        g_nrf54_debug_stats.get_csl_phase_sample_time_zero++;
-    }
-
-    return phase;
+    sTransmitFrame.mInfo.mTxInfo.mIsSecurityProcessed = aMetadata->frame_props.is_secured;
+    sTransmitFrame.mInfo.mTxInfo.mIsHeaderUpdated     = aMetadata->frame_props.dynamic_data_is_set;
 }
 #endif
 
 void nrf_802154_tx_ack_started(const uint8_t *p_data)
 {
-    otRadioFrame ackFrame;
-#if OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
-    uint8_t      linkMetricsDataLen = 0;
-    uint8_t      linkMetricsData[OT_ENH_PROBING_IE_DATA_MAX_SIZE];
-    otMacAddress macAddress;
-#endif
-
-    OT_UNUSED_VARIABLE(ackFrame);
-
-    ackFrame.mPsdu   = (uint8_t *)(p_data + 1);
-    ackFrame.mLength = p_data[0];
-
-    // Check if the frame pending bit is set in ACK frame.
     sAckedWithFramePending = p_data[FRAME_PENDING_OFFSET] & FRAME_PENDING_BIT;
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
-    // Update IE and secure Enh-ACK.
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-    if (sCslPeriod > 0)
-    {
-        otMacFrameSetCslIe(&ackFrame, sCslPeriod, getCslPhase());
-    }
-#endif
+    otRadioFrame ackFrame;
 
-#if OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
-    otMacFrameGetDstAddr(&ackFrame, &macAddress);
-    // nRF54 driver no longer passes RSSI/LQI in this callout; use placeholders for POC.
-    if ((linkMetricsDataLen = otLinkMetricsEnhAckGenData(&macAddress, 0, 0, linkMetricsData)) > 0)
-    {
-        otMacFrameSetEnhAckProbingIe(&ackFrame, linkMetricsData, linkMetricsDataLen);
-    }
-#endif
+    sAckedWithSecEnhAck = false;
 
-    txAckProcessSecurity((uint8_t *)p_data);
+    otEXPECT(p_data[SECURITY_ENABLED_OFFSET] & SECURITY_ENABLED_BIT);
+
+    memset(&ackFrame, 0, sizeof(ackFrame));
+    ackFrame.mPsdu   = (uint8_t *)(p_data + 1);
+    ackFrame.mLength = p_data[0];
+
+    otEXPECT(otMacFrameIsKeyIdMode1(&ackFrame) && otMacFrameGetKeyId(&ackFrame) != 0);
+
+    sAckedWithSecEnhAck = true;
+    sAckFrameCounter    = otMacFrameGetFrameCounter(&ackFrame);
+    sAckKeyId           = otMacFrameGetKeyId(&ackFrame);
+
+exit:
+    return;
 #endif
 }
 
@@ -1581,6 +1451,10 @@ void nrf_802154_transmitted_raw(uint8_t                                   *p_fra
     uint8_t *ackPsdu = p_metadata->data.transmitted.p_ack;
 
     assert(p_frame == sTransmitPsdu);
+
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+    nrf54UpdateTxFrameInfo(p_metadata);
+#endif
 
     SetRadioDriverState(NRF_802154_STATE_RECEIVE);
 
@@ -1609,8 +1483,11 @@ void nrf_802154_transmit_failed(uint8_t                                   *p_fra
                                 nrf_802154_tx_error_t                      error,
                                 const nrf_802154_transmit_done_metadata_t *p_metadata)
 {
-    OT_UNUSED_VARIABLE(p_metadata);
     assert(p_frame == sTransmitPsdu);
+
+#if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+    nrf54UpdateTxFrameInfo(p_metadata);
+#endif
 
     SetRadioDriverState(NRF_802154_STATE_RECEIVE);
     g_nrf54_debug_stats.last_driver_error = error;
@@ -1675,18 +1552,6 @@ int8_t otPlatRadioGetReceiveSensitivity(otInstance *aInstance)
     return NRF54L15_RECEIVE_SENSITIVITY;
 }
 
-#if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
-void nrf_802154_tx_started(const uint8_t *aFrame)
-{
-    assert(aFrame == sTransmitPsdu);
-    OT_UNUSED_VARIABLE(aFrame);
-
-    /* nRF52 model: AES-CCM here, just before on-air TX (core hooks call this in CSMA path). */
-    g_nrf54_debug_stats.tx_late_encrypt_hook_enter++;
-    nrf54ProcessTransmitSecurity(&sTransmitFrame);
-}
-#endif
-
 void nrf_802154_random_init(void)
 {
     // Intentionally empty
@@ -1710,6 +1575,23 @@ uint64_t otPlatRadioGetNow(otInstance *aInstance)
 }
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
+
+static void nrf54SecurityKeyStore(uint8_t *aKeyValue, nrf_802154_key_id_mode_t aKeyIdMode, uint8_t *aKeyId)
+{
+    nrf_802154_key_t key = {
+        .value.p_cleartext_key   = aKeyValue,
+        .id.mode                 = aKeyIdMode,
+        .id.p_key_id             = aKeyId,
+        .type                    = NRF_802154_KEY_CLEARTEXT,
+        .frame_counter           = 0,
+        .use_global_frame_counter = true,
+    };
+
+    nrf_802154_security_error_t err = nrf_802154_security_key_store(&key);
+
+    assert(err == NRF_802154_SECURITY_ERROR_NONE || err == NRF_802154_SECURITY_ERROR_ALREADY_PRESENT);
+}
+
 void otPlatRadioSetMacKey(otInstance             *aInstance,
                           uint8_t                 aKeyIdMode,
                           uint8_t                 aKeyId,
@@ -1718,19 +1600,38 @@ void otPlatRadioSetMacKey(otInstance             *aInstance,
                           const otMacKeyMaterial *aNextKey,
                           otRadioKeyType          aKeyType)
 {
+    uint8_t keyIdMode = aKeyIdMode >> 3;
+    uint8_t prevKeyId = 0;
+    uint8_t nextKeyId = 0;
+
     OT_UNUSED_VARIABLE(aInstance);
-    OT_UNUSED_VARIABLE(aKeyIdMode);
 
     assert(aKeyType == OT_KEY_TYPE_LITERAL_KEY);
     assert(aPrevKey != NULL && aCurrKey != NULL && aNextKey != NULL);
 
     NRFX_CRITICAL_SECTION_ENTER();
 
-    sKeyId               = aKeyId;
-    sPrevKey             = *aPrevKey;
-    sCurrKey             = *aCurrKey;
-    sNextKey             = *aNextKey;
-    sPrevMacFrameCounter = sMacFrameCounter;
+    if (keyIdMode == 1)
+    {
+        assert(NRF_802154_SECURITY_KEY_STORAGE_SIZE >= 3);
+
+        /* Thread Key ID Mode 1: valid key indices are 1..0x80 with wrap. */
+        prevKeyId = (aKeyId == 1) ? 0x80 : (aKeyId - 1);
+        nextKeyId = (aKeyId == 0x80) ? 1 : (aKeyId + 1);
+
+        nrf_802154_security_key_remove_all();
+
+        nrf54SecurityKeyStore((uint8_t *)aPrevKey->mKeyMaterial.mKey.m8, keyIdMode, &prevKeyId);
+        nrf54SecurityKeyStore((uint8_t *)aCurrKey->mKeyMaterial.mKey.m8, keyIdMode, &aKeyId);
+        nrf54SecurityKeyStore((uint8_t *)aNextKey->mKeyMaterial.mKey.m8, keyIdMode, &nextKeyId);
+    }
+    else
+    {
+        /* aKeyId == 0 with mode 0: stack reset / key clear (RCP convention). */
+        assert(keyIdMode == 0 && aKeyId == 0);
+
+        nrf_802154_security_key_remove_all();
+    }
 
     NRFX_CRITICAL_SECTION_EXIT();
 }
@@ -1742,6 +1643,7 @@ void otPlatRadioSetMacFrameCounter(otInstance *aInstance, uint32_t aMacFrameCoun
     NRFX_CRITICAL_SECTION_ENTER();
 
     sMacFrameCounter = aMacFrameCounter;
+    nrf_802154_security_global_frame_counter_set(aMacFrameCounter);
 
     NRFX_CRITICAL_SECTION_EXIT();
 }
@@ -1756,6 +1658,8 @@ void otPlatRadioSetMacFrameCounterIfLarger(otInstance *aInstance, uint32_t aMacF
     {
         sMacFrameCounter = aMacFrameCounter;
     }
+
+    nrf_802154_security_global_frame_counter_set_if_larger(aMacFrameCounter);
 
     NRFX_CRITICAL_SECTION_EXIT();
 }
@@ -1833,6 +1737,9 @@ otError otPlatRadioEnableCsl(otInstance         *aInstance,
         sCslHfclkHeld = false;
     }
     /* CSL-F1-END */
+#if NRF_802154_DELAYED_TRX_ENABLED && NRF_802154_IE_WRITER_ENABLED
+    nrf_802154_csl_writer_period_set((uint16_t)aCslPeriod);
+#endif
 
     updateIeData(aInstance, aShortAddr, aExtAddr);
 
@@ -1845,7 +1752,10 @@ void otPlatRadioUpdateCslSampleTime(otInstance *aInstance, uint32_t aCslSampleTi
 
     g_nrf54_debug_stats.update_csl_sample_time_enter++;
     g_nrf54_debug_stats.last_update_csl_sample_time = aCslSampleTime;
-    sCslSampleTime                                  = aCslSampleTime;
+    sCslSampleTime = aCslSampleTime;
+#if NRF_802154_DELAYED_TRX_ENABLED && NRF_802154_IE_WRITER_ENABLED
+    nrf_802154_csl_writer_anchor_time_set(unwrapFutureRadioTimeUs(aCslSampleTime));
+#endif
 }
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 

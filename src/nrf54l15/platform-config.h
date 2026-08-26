@@ -64,11 +64,11 @@
 #endif
 
 #ifndef NRF_802154_SECURITY_WRITER_ENABLED
-#define NRF_802154_SECURITY_WRITER_ENABLED 0
+#define NRF_802154_SECURITY_WRITER_ENABLED 1
 #endif
 
 #ifndef NRF_802154_ENCRYPTION_ENABLED
-#define NRF_802154_ENCRYPTION_ENABLED 0
+#define NRF_802154_ENCRYPTION_ENABLED 1
 #endif
 
 #ifndef PLATFORM_FEM_ENABLE_DEFAULT_CONFIG
@@ -145,6 +145,20 @@
  */
 #ifndef OT_XTAL_ACCURACY
 #define OT_XTAL_ACCURACY 40
+#endif
+
+#ifndef OT_GRTC_ALWAYS_ON
+#define OT_GRTC_ALWAYS_ON 1
+#endif
+
+/**
+ * @def OT_HFCLK_ALWAYS_ON
+ *
+ * When set, nrf5AlarmInit() starts XO/HFCLK before GRTC syscounter and holds
+ * one ref-count (+1) for the lifetime of the firmware.
+ */
+#ifndef OT_HFCLK_ALWAYS_ON
+#define OT_HFCLK_ALWAYS_ON 1
 #endif
 
 #endif // PLATFORM_CONFIG_H_
