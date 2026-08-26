@@ -17,11 +17,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* CSL-F1: debug counter hfclk_latency_set_calls */
-#ifdef NRF54_DEBUG_STATS
-#include "nrf54_debug_stats.h"
-#endif
-
 #include <nrfx.h>
 #include <nrfx_clock_lfclk.h>
 
@@ -33,22 +28,6 @@
 
 static uint8_t mLfclkUsers;
 static uint8_t mHfclkUsers;
-
-/* CSL-F1-BEGIN: warm XO → RSCH m_prec_ramp_up ≈ 152 µs (revert F1: remove block through CSL-F1-END) */
-static bool    mHfclkLatencySet;
-
-static void hfclk_warm_latency_apply(void)
-{
-    if (!mHfclkLatencySet)
-    {
-        nrf_802154_clock_hfclk_latency_set(0);
-        mHfclkLatencySet = true;
-#ifdef NRF54_DEBUG_STATS
-        g_nrf54_debug_stats.hfclk_latency_set_calls++;
-#endif
-    }
-}
-/* CSL-F1-END */
 
 static void lfclk_evt_handler(nrfx_clock_lfclk_evt_type_t event)
 {
@@ -63,7 +42,6 @@ static void lfclk_evt_handler(nrfx_clock_lfclk_evt_type_t event)
 static void hfclk_evt_handler(void)
 {
     nrf_802154_clock_hfclk_ready();
-    hfclk_warm_latency_apply(); /* CSL-F1 */
 }
 
 static bool hfclk_running_check(void)
@@ -111,7 +89,6 @@ static void xo_evt_handler(nrfx_clock_xo_event_type_t event)
     if (event == NRFX_CLOCK_XO_EVT_HFCLK_STARTED)
     {
         nrf_802154_clock_hfclk_ready();
-        hfclk_warm_latency_apply(); /* CSL-F1 */
     }
 }
 
@@ -178,7 +155,6 @@ void nrf_802154_clock_deinit(void)
 
     mLfclkUsers = 0;
     mHfclkUsers = 0;
-    mHfclkLatencySet = false; /* CSL-F1 */
 
     hfclk_drv_uninit();
 
@@ -196,7 +172,6 @@ void nrf_802154_clock_hfclk_start(void)
         if (hfclk_running_check())
         {
             nrf_802154_clock_hfclk_ready();
-            hfclk_warm_latency_apply(); /* CSL-F1 */
         }
         else
         {
@@ -206,7 +181,6 @@ void nrf_802154_clock_hfclk_start(void)
     else if (hfclk_running_check())
     {
         nrf_802154_clock_hfclk_ready();
-        hfclk_warm_latency_apply(); /* CSL-F1 */
     }
 }
 
