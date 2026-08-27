@@ -1,0 +1,134 @@
+#!/bin/bash
+#
+#  Copyright (c) 2020, The OpenThread Authors.
+#  All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+#  1. Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#  2. Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in the
+#     documentation and/or other materials provided with the distribution.
+#  3. Neither the name of the copyright holder nor the
+#     names of its contributors may be used to endorse or promote products
+#     derived from this software without specific prior written permission.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+#  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+#  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+#  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+#  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+#  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+#  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+#  POSSIBILITY OF SUCH DAMAGE.
+#
+# Flash ot-cli-ftd built by script/build-nrf54l15-cli-ftd-csl onto a connected nRF54L15 DK.
+#
+# Usage:
+#   ./script/flash-nrf54l15-cli-ftd-csl
+#   ./script/flash-nrf54l15-cli-ftd-csl <serial-number>
+#   ./script/flash-nrf54l15-cli-ftd-csl /path/to/ot-cli-ftd[.hex|.elf]
+#
+# Environment:
+#   OT_CMAKE_BUILD_DIR     Build tree (default: build-nrf54l15-cli-ftd-csl)
+#   NRFUTIL_SERIAL_NUMBER  J-Link / DK serial (optional if one device connected)
+#   NRFUTIL_PROGRAM_OPTIONS  Default: chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM
+#   OBJCOPY                arm-none-eabi-objcopy (default: on PATH)
+
+set -euo pipefail
+
+OT_SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly OT_SRCDIR
+
+OT_CMAKE_BUILD_DIR="${OT_CMAKE_BUILD_DIR:-build-nrf54l15-cli-ftd-csl}"
+OT_APP_NAME=ot-cli-ftd
+NRFUTIL_PROGRAM_OPTIONS="${NRFUTIL_PROGRAM_OPTIONS:-chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM}"
+OBJCOPY="${OBJCOPY:-arm-none-eabi-objcopy}"
+
+die()
+{
+    echo " ** ERROR: $1" >&2
+    exit 1
+}
+
+require_cmd()
+{
+    command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
+}
+
+resolve_firmware()
+{
+    local input="${1:-}"
+
+    if [[ -n "${input}" ]]; then
+        case "${input}" in
+            *.hex) echo "${input}"; return ;;
+            *.elf|*) echo "${input%.elf}.hex"; return ;;
+        esac
+    fi
+
+    echo "${OT_SRCDIR}/${OT_CMAKE_BUILD_DIR}/bin/${OT_APP_NAME}.hex"
+}
+
+elf_to_hex()
+{
+    local elf="$1"
+    local hex="$2"
+
+    [[ -f "${elf}" ]] || die "ELF not found: ${elf} (run ./script/build-nrf54l15-cli-ftd-csl first)"
+    require_cmd "${OBJCOPY}"
+    "${OBJCOPY}" -O ihex "${elf}" "${hex}"
+}
+
+main()
+{
+    local arg="${1:-}"
+    local serial="${NRFUTIL_SERIAL_NUMBER:-}"
+    local firmware_path
+    local elf_path
+    local hex_path
+
+    require_cmd nrfutil
+
+    if [[ -n "${arg}" && "${arg}" != *.hex && "${arg}" != *.elf && "${arg}" =~ ^[0-9]+$ ]]; then
+        serial="${arg}"
+        arg=""
+    fi
+
+    firmware_path="$(resolve_firmware "${arg}")"
+
+    if [[ "${firmware_path}" == *.hex ]]; then
+        hex_path="${firmware_path}"
+        if [[ ! -f "${hex_path}" ]]; then
+            elf_path="${hex_path%.hex}"
+            elf_to_hex "${elf_path}" "${hex_path}"
+        fi
+    else
+        elf_path="${firmware_path%.hex}"
+        hex_path="${elf_path}.hex"
+        elf_to_hex "${elf_path}" "${hex_path}"
+    fi
+
+    echo "Programming ${hex_path}"
+    if [[ -n "${serial}" ]]; then
+        echo "Device serial: ${serial}"
+        nrfutil device program \
+            --firmware "${hex_path}" \
+            --serial-number "${serial}" \
+            --options "${NRFUTIL_PROGRAM_OPTIONS}"
+    else
+        echo "Device: auto (single connected DK / J-Link)"
+        nrfutil device list
+        nrfutil device program \
+            --firmware "${hex_path}" \
+            --options "${NRFUTIL_PROGRAM_OPTIONS}"
+    fi
+
+    echo "Done."
+}
+
+main "$@"
