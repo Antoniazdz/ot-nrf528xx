@@ -29,13 +29,13 @@
 # Flash ot-cli-ftd built by script/build-nrf54l15-cli-ftd-csl onto a connected nRF54L15 DK.
 #
 # Usage:
-#   ./script/flash-nrf54l15-cli-ftd-csl
-#   ./script/flash-nrf54l15-cli-ftd-csl <serial-number>
-#   ./script/flash-nrf54l15-cli-ftd-csl /path/to/ot-cli-ftd[.hex|.elf]
+#   ./script/flash-nrf54l15-cli-ftd-csl-debug
+#   ./script/flash-nrf54l15-cli-ftd-csl-debug <serial-number>
+#   ./script/flash-nrf54l15-cli-ftd-csl-debug /path/to/ot-cli-ftd[.hex|.elf]
 #
 # Environment:
-#   OT_CMAKE_BUILD_DIR     Build tree (default: build-nrf54l15-cli-ftd-csl)
-#   NRFUTIL_SERIAL_NUMBER  J-Link / DK serial (optional if one device connected)
+#   OT_CMAKE_BUILD_DIR     Build tree (default: build-nrf54l15-cli-ftd-csl-debug)
+#   NRFUTIL_SERIAL_NUMBER  J-Link serial (default: nRF54L15 DK / PCA10156 via nrfutil)
 #   NRFUTIL_PROGRAM_OPTIONS  Default: chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM
 #   OBJCOPY                arm-none-eabi-objcopy (default: on PATH)
 
@@ -44,7 +44,7 @@ set -euo pipefail
 OT_SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly OT_SRCDIR
 
-OT_CMAKE_BUILD_DIR="${OT_CMAKE_BUILD_DIR:-build-nrf54l15-cli-ftd-csl}"
+OT_CMAKE_BUILD_DIR="${OT_CMAKE_BUILD_DIR:-build-nrf54l15-cli-ftd-csl-debug}"
 OT_APP_NAME=ot-cli-ftd
 NRFUTIL_PROGRAM_OPTIONS="${NRFUTIL_PROGRAM_OPTIONS:-chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM}"
 OBJCOPY="${OBJCOPY:-arm-none-eabi-objcopy}"
@@ -84,6 +84,26 @@ elf_to_hex()
     "${OBJCOPY}" -O ihex "${elf}" "${hex}"
 }
 
+nrf54l15_jlink_serial()
+{
+    nrfutil device list --json 2>/dev/null | python3 -c "
+import json, sys
+for line in sys.stdin:
+    try:
+        o = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if o.get('type') != 'info':
+        continue
+    for d in o.get('data', {}).get('devices', []):
+        if (d.get('devkit') or {}).get('boardVersion') == 'PCA10156':
+            sn = d.get('serialNumber', '')
+            print(sn.lstrip('0') or sn)
+            sys.exit(0)
+sys.exit(1)
+" || die "No nRF54L15 DK (PCA10156) found. Connect one or set NRFUTIL_SERIAL_NUMBER."
+}
+
 main()
 {
     local arg="${1:-}"
@@ -114,19 +134,14 @@ main()
     fi
 
     echo "Programming ${hex_path}"
-    if [[ -n "${serial}" ]]; then
-        echo "Device serial: ${serial}"
-        nrfutil device program \
-            --firmware "${hex_path}" \
-            --serial-number "${serial}" \
-            --options "${NRFUTIL_PROGRAM_OPTIONS}"
-    else
-        echo "Device: auto (single connected DK / J-Link)"
-        nrfutil device list
-        nrfutil device program \
-            --firmware "${hex_path}" \
-            --options "${NRFUTIL_PROGRAM_OPTIONS}"
+    if [[ -z "${serial}" ]]; then
+        serial="$(nrf54l15_jlink_serial)"
     fi
+    echo "Device serial: ${serial} (nRF54L15 DK / PCA10156)"
+    nrfutil device program \
+        --firmware "${hex_path}" \
+        --serial-number "${serial}" \
+        --options "${NRFUTIL_PROGRAM_OPTIONS}"
 
     echo "Done."
 }

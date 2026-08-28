@@ -26,31 +26,27 @@
 #  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 #  POSSIBILITY OF SUCH DAMAGE.
 #
-# Flash NCS Thread CLI on nRF52840 DK, flash ot-cli-ftd (CSL) on nRF54L15 DK,
-# bring up a network (52840 leader), join 54L15 as CSL child, sleep 5s, exit.
-# Serial output from both boards is streamed with [leader] / [child] prefixes.
+# Flash NCS Thread CLI test firmware (nRF52840 DK) from ncs_hex/.
 #
 # Usage:
-#   ./script/run-nrf52-leader-nrf54-csl-child-test.sh
+#   ./script/flash-nrf52840-ncs-thread-cli
+#   ./script/flash-nrf52840-ncs-thread-cli <serial-number>
+#   ./script/flash-nrf52840-ncs-thread-cli /path/to/firmware.hex
 #
 # Environment:
-#   CSL_PERIOD_US          CSL period in microseconds (default: 500000 = 500 ms).
-#                          Must be a multiple of 160; minimum on this stack is ~16000 µs.
-#                          (500 µs is below the minimum — use 500000 for 500 ms.)
-#   NRF52840_SERIAL        Override J-Link serial for nRF52840 DK
-#   NRF54L15_SERIAL        Override J-Link serial for nRF54L15 DK
-#   SKIP_FLASH=1           Skip programming (only run Thread/CSL steps)
-#   POST_START_SLEEP       Seconds after child thread start (default: 5)
-#   CHILD_ATTACH_TIMEOUT   Max wait for Child Update / CSL sync (default: 120)
-#   Pass --quiet to the Python step to hide live serial (see script --help).
+#   NCS_HEX                Hex file (default: bundled ncs_v3.0.0_thread_cli_test_…)
+#   NRF52840_SERIAL        J-Link serial (alias for NRFUTIL_SERIAL_NUMBER)
+#   NRFUTIL_SERIAL_NUMBER  J-Link serial (default: nRF52840 DK / PCA10056 via nrfutil)
+#   NRFUTIL_PROGRAM_OPTIONS  Default: chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM
 
 set -euo pipefail
 
 OT_SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly OT_SRCDIR
 
-POST_START_SLEEP="${POST_START_SLEEP:-5}"
-CSL_PERIOD_US="${CSL_PERIOD_US:-500000}"
+DEFAULT_NCS_HEX="${OT_SRCDIR}/ncs_hex/ncs_v3.0.0_thread_cli_test_singleprotocol_nrf52840dk_nrf52840.hex"
+NCS_HEX="${NCS_HEX:-${DEFAULT_NCS_HEX}}"
+NRFUTIL_PROGRAM_OPTIONS="${NRFUTIL_PROGRAM_OPTIONS:-chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM}"
 
 die()
 {
@@ -63,12 +59,10 @@ require_cmd()
     command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
-nrfutil_serial_for_board()
+nrf52840_jlink_serial()
 {
-    local board="$1"
     nrfutil device list --json 2>/dev/null | python3 -c "
 import json, sys
-board = sys.argv[1]
 for line in sys.stdin:
     try:
         o = json.loads(line)
@@ -77,50 +71,58 @@ for line in sys.stdin:
     if o.get('type') != 'info':
         continue
     for d in o.get('data', {}).get('devices', []):
-        if (d.get('devkit') or {}).get('boardVersion') == board:
+        if (d.get('devkit') or {}).get('boardVersion') == 'PCA10056':
             sn = d.get('serialNumber', '')
             print(sn.lstrip('0') or sn)
             sys.exit(0)
 sys.exit(1)
-" "${board}" || die "No ${board} DK found"
+" || die "No nRF52840 DK (PCA10056) found. Connect one or set NRFUTIL_SERIAL_NUMBER."
 }
 
-flash_nrf52840_ncs()
+program_with_recover()
 {
-    echo "=== Flash nRF52840 DK ==="
-    if [[ -n "${NRF52840_SERIAL:-}" ]]; then
-        "${OT_SRCDIR}/script/flash-nrf52840-ncs-thread-cli" "${NRF52840_SERIAL}"
-    else
-        "${OT_SRCDIR}/script/flash-nrf52840-ncs-thread-cli"
+    local serial="$1"
+    local hex="$2"
+
+    if ! nrfutil device program \
+        --firmware "${hex}" \
+        --serial-number "${serial}" \
+        --options "${NRFUTIL_PROGRAM_OPTIONS}" 2>&1; then
+        echo "Program failed (often AP-Protect); recovering..."
+        nrfutil device recover --serial-number "${serial}"
+        nrfutil device program \
+            --firmware "${hex}" \
+            --serial-number "${serial}" \
+            --options "${NRFUTIL_PROGRAM_OPTIONS}"
     fi
-}
-
-flash_nrf54l15_cli()
-{
-    local serial="${NRF54L15_SERIAL:-$(nrfutil_serial_for_board PCA10156)}"
-    echo "=== Flash nRF54L15 DK (serial ${serial}) ==="
-    "${OT_SRCDIR}/script/flash-nrf54l15-cli-ftd-csl-debug" "${serial}"
 }
 
 main()
 {
+    local arg="${1:-}"
+    local serial="${NRF52840_SERIAL:-${NRFUTIL_SERIAL_NUMBER:-}}"
+
     require_cmd nrfutil
     require_cmd python3
 
-    python3 -c "import serial" 2>/dev/null || die "Python package 'pyserial' required (pip install pyserial)"
-
-    if [[ "${SKIP_FLASH:-0}" != "1" ]]; then
-        flash_nrf52840_ncs
-        flash_nrf54l15_cli
-        echo "Waiting for boards to boot..."
-        sleep 3
+    if [[ -n "${arg}" && "${arg}" != *.hex && "${arg}" =~ ^[0-9]+$ ]]; then
+        serial="${arg}"
+        arg=""
+    elif [[ -n "${arg}" && "${arg}" == *.hex ]]; then
+        NCS_HEX="${arg}"
+        arg=""
     fi
 
-    echo "=== Thread + CSL test (CSL_PERIOD_US=${CSL_PERIOD_US}) ==="
-    python3 "${OT_SRCDIR}/script/run-nrf52-leader-nrf54-csl-child-test.py" \
-        --csl-period-us "${CSL_PERIOD_US}" \
-        --post-start-sleep "${POST_START_SLEEP}" \
-        "$@"
+    [[ -f "${NCS_HEX}" ]] || die "Missing firmware: ${NCS_HEX}"
+
+    if [[ -z "${serial}" ]]; then
+        serial="$(nrf52840_jlink_serial)"
+    fi
+
+    echo "Programming ${NCS_HEX}"
+    echo "Device serial: ${serial} (nRF52840 DK / PCA10056)"
+    program_with_recover "${serial}" "${NCS_HEX}"
+    echo "Done."
 }
 
 main "$@"
