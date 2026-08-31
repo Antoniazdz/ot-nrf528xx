@@ -29,4 +29,14 @@
 # nRF54L15 RCP (UART/Spinel only).
 list(APPEND OT_PLATFORM_DEFINES "UART_AS_SERIAL_TRANSPORT=1")
 
+# A/B knobs for the config macros that openthread-core-nrf54l15-config.h leaves overridable, e.g.
+#   -DNRF54_EXTRA_DEFINES="OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER=30000;OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AHEAD=5000"
+# Plain `cmake -DOPENTHREAD_CONFIG_...=x` does not work: that only sets a CMake cache variable,
+# it never reaches the compiler.
+set(NRF54_EXTRA_DEFINES "" CACHE STRING "Extra compile definitions, MACRO=VALUE, ';'-separated")
+if(NRF54_EXTRA_DEFINES)
+    message(STATUS "nRF54 extra defines: ${NRF54_EXTRA_DEFINES}")
+    list(APPEND OT_PLATFORM_DEFINES ${NRF54_EXTRA_DEFINES})
+endif()
+
 include(nrf54l15/nrf54l15.cmake)

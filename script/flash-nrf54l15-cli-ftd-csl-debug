@@ -123,8 +123,9 @@ main()
 
     if [[ "${firmware_path}" == *.hex ]]; then
         hex_path="${firmware_path}"
-        if [[ ! -f "${hex_path}" ]]; then
-            elf_path="${hex_path%.hex}"
+        elf_path="${hex_path%.hex}"
+        # Regenerate whenever the ELF is newer, otherwise a rebuild would be flashed as the old image.
+        if [[ ! -f "${hex_path}" || ( -f "${elf_path}" && "${elf_path}" -nt "${hex_path}" ) ]]; then
             elf_to_hex "${elf_path}" "${hex_path}"
         fi
     else
