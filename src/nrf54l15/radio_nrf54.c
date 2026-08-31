@@ -692,6 +692,9 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
     if (result)
     {
         g_nrf54_debug_stats.csl_receive_at_ok++;
+#ifdef NRF54_DEBUG_STATS
+        nrf54CslDebugWinCapPlan();
+#endif
     }
     else
     {
@@ -1750,11 +1753,16 @@ void otPlatRadioUpdateCslSampleTime(otInstance *aInstance, uint32_t aCslSampleTi
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    g_nrf54_debug_stats.update_csl_sample_time_enter++;
+    uint64_t anchorUnwrapped = unwrapFutureRadioTimeUs(aCslSampleTime);
+
     g_nrf54_debug_stats.last_update_csl_sample_time = aCslSampleTime;
-    sCslSampleTime = aCslSampleTime;
+    sCslSampleTime                                  = aCslSampleTime;
 #if NRF_802154_DELAYED_TRX_ENABLED && NRF_802154_IE_WRITER_ENABLED
-    nrf_802154_csl_writer_anchor_time_set(unwrapFutureRadioTimeUs(aCslSampleTime));
+    nrf_802154_csl_writer_anchor_time_set(anchorUnwrapped);
+#endif
+
+#ifdef NRF54_DEBUG_STATS
+    nrf54CslDebugUpdateCslSampleTime((uint32_t)anchorUnwrapped, (uint16_t)sCslPeriod);
 #endif
 }
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE

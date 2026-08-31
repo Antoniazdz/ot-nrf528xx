@@ -46,6 +46,8 @@ target_compile_definitions(nrf-802154-platform
     PUBLIC
         NRF54_DEBUG_STATS=1
     PRIVATE
+        NRF54L15_XXAA
+        NRF_APPLICATION
         NRF54_LPTIMER_CC2_ONLY_BISECT=0
         NRF54_LPTIMER_CC2_STUB_BISECT=0
 )

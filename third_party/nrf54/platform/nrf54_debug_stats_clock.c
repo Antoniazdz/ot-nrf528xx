@@ -9,6 +9,7 @@
 
 #include "nrf_802154_clock.h"
 
+#include <nrfx.h>
 #include <nrfx_grtc.h>
 
 void nrf54DebugStatsClockSample(void)
@@ -38,4 +39,9 @@ void nrf54DebugStatsClockSample(void)
     {
         g_nrf54_debug_stats.hfclk_not_running_samples++;
     }
+
+#if defined(CLOCK_LFCLK_SRC_SRC_Msk)
+    g_nrf54_debug_stats.last_lfclk_stat_reg = NRF_CLOCK->LFCLK.STAT;
+    g_nrf54_debug_stats.last_lfclk_src_cfg  = NRF_CLOCK->LFCLK.SRC;
+#endif
 }

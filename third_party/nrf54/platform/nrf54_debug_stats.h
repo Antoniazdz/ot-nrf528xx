@@ -83,6 +83,10 @@ typedef struct
     uint32_t last_grtc_active_request;        /* snapshot 0/1 */
     uint32_t last_grtc_ready;                 /* snapshot 0/1 */
 
+    /* Raw LFCLK register snapshots (memrd-safe via RAM; CLOCK block not readable by nrfjprog). */
+    uint32_t last_lfclk_stat_reg; /* CLOCK.LFCLK.STAT: bits0-1=src (0 LFRC/1 LFXO/2 LFSYNT), bit16=running */
+    uint32_t last_lfclk_src_cfg;  /* CLOCK.LFCLK.SRC: requested LFCLK source */
+
     uint32_t csl_alarm_process_early; /* CSL-F4.1: nrf54ProcessMainLoop early alarm */
 
     uint32_t tx_enter;
@@ -315,6 +319,143 @@ typedef struct
     uint32_t csl_plat_receive_at_phase_corrected; /* ReceiveAt winStart shifted to parent phase */
     uint32_t last_csl_plat_phase_shift_us;        /* |shift| applied to last ReceiveAt */
     uint32_t last_csl_plat_win_start_corrected;   /* winStart after platform phase shift */
+
+    /* OT SubMac — GRTC + grid at HandleCslTimer / HandleCslReceiveAt. */
+    uint32_t last_grtc_at_handle_csl_timer;
+    uint32_t last_grtc_at_handle_csl_receive_at;
+    uint32_t last_csl_ot_sample_time_before;   /* mCslSampleTimeRadio before += period */
+    uint32_t last_csl_ot_sample_time_after;    /* anchor passed to UpdateCslSampleTime */
+    uint32_t last_csl_ot_sample_phase_before_us;
+    uint32_t last_csl_ot_sample_phase_after_us;
+    uint32_t last_csl_ot_win_start;
+    uint32_t last_csl_ot_win_end;
+    uint32_t last_csl_ot_win_duration;
+    uint32_t last_csl_ot_time_ahead;
+    uint32_t last_csl_ot_time_after;
+    uint32_t last_csl_ot_next_timer_fire;
+    uint32_t last_csl_ot_last_sync;
+    uint32_t last_csl_ot_elapsed_since_sync_us;
+
+    /* otPlatRadioUpdateCslSampleTime — anchor handed to driver IE writer. */
+    uint32_t last_grtc_at_update_csl_sample_time;
+    uint32_t last_csl_anchor_unwrapped_lo;
+    uint32_t last_csl_anchor_phase_us;
+
+    /* IE writer csl_phase_calc (Enh-ACK CSL IE → parent). */
+    uint32_t csl_ie_phase_calc_enter;
+    uint32_t csl_ie_phase_calc_ok;
+    uint32_t csl_ie_phase_calc_fail;
+    uint32_t csl_ie_phase_calc_fallback; /* no anchor → DRX midpoint */
+    uint32_t csl_ie_anchor_set_enter;
+    uint32_t csl_ie_period_set_enter;
+    uint32_t last_grtc_at_csl_ie_anchor_set;
+    uint32_t last_grtc_at_csl_ie_phase_calc;
+    uint32_t last_csl_ie_anchor_lo;           /* anchor at last phase calc / set */
+    uint32_t last_csl_ie_sl_timer_us;         /* sl_timer at phase calc */
+    uint32_t last_csl_ie_ref_time_us;         /* sl_timer+64 µs (MHR estimate) */
+    uint32_t last_csl_ie_us_to_next_window;   /* us until next sample (pre-round) */
+    uint32_t last_csl_ie_phase_ten_symbols;   /* phase encoded in CSL IE */
+    uint32_t last_csl_ie_period_at_calc;
+    uint32_t last_csl_ie_anchor_set_flag;     /* m_csl_anchor_time_set at calc */
+    uint32_t last_csl_ie_sl_minus_grtc_us;    /* sl_timer − GRTC at phase calc */
+    uint32_t last_csl_ie_pred_next_sample_grtc; /* anchor = OT next sample point */
+    uint32_t last_csl_ie_pred_curr_sample_grtc; /* anchor − period */
+    uint32_t last_csl_ie_pred_mhr_at_grtc;      /* ref_time (≈ MHR) at IE write */
+
+    /* Predicted GRTC ticks from OT window plan (HandleCslReceiveAt). */
+    uint32_t last_csl_pred_sample_grtc;       /* sample point for this window */
+    uint32_t last_csl_pred_win_start_grtc;
+    uint32_t last_csl_pred_win_end_grtc;
+    uint32_t last_csl_pred_next_sample_grtc;  /* anchor after advance */
+    uint32_t last_csl_pred_cc8_fire_grtc;   /* winStart − 1190 µs (SAFE_DELTA+190) */
+    uint32_t last_csl_pred_rx_active_grtc;    /* ≈ winStart */
+
+    /* RestartCslTimerAfterSyncUpdate. */
+    uint32_t csl_restart_after_sync_enter;
+    uint32_t last_grtc_at_restart_sync;
+    uint32_t last_csl_sync_rewind_sample_time;
+
+    /* delayed_trx DRX schedule (nrf_802154_delayed_trx_receive). */
+    uint32_t last_drx_rx_time_arg_lo;         /* rx_time arg (32-bit) */
+    uint32_t last_drx_trigger_time_lo;        /* after −setup−ramp */
+    uint32_t last_grtc_at_drx_receive;
+    uint32_t last_drx_timeout_length_us;
+
+    /* First-two CSL window capture (plan at ReceiveAt ok, close at DRX timeout). */
+    uint32_t csl_win_cap_plan_count;
+    uint32_t csl_win_cap_close_count;
+    /* Window 1 */
+    uint32_t csl_cap0_grtc_at_ot_plan;
+    uint32_t csl_cap0_grtc_at_plat_plan;
+    uint32_t csl_cap0_ot_sample_before;
+    uint32_t csl_cap0_ot_sample_after;
+    uint32_t csl_cap0_ot_win_start;
+    uint32_t csl_cap0_ot_win_end;
+    uint32_t csl_cap0_ot_win_duration;
+    uint32_t csl_cap0_anchor_phase_us;
+    uint32_t csl_cap0_win_phase_us;
+    uint32_t csl_cap0_ie_phase_ten_symbols;
+    uint32_t csl_cap0_ie_anchor_lo;
+    uint32_t csl_cap0_ie_ref_mhr_grtc;  /* sl_timer+64 @ last IE calc before plan */
+    uint32_t csl_cap0_ie_sl_timer_grtc; /* sl_timer before +64 */
+    uint32_t csl_cap0_grtc_at_drx_sched;
+    uint32_t csl_cap0_drx_rx_time_lo;
+    uint32_t csl_cap0_drx_trigger_lo;
+    uint32_t csl_cap0_grtc_at_close;
+    uint32_t csl_cap0_hw_cc8_fire_grtc;
+    uint32_t csl_cap0_pred_cc8_fire_grtc;
+    /* Window 2 */
+    uint32_t csl_cap1_grtc_at_ot_plan;
+    uint32_t csl_cap1_grtc_at_plat_plan;
+    uint32_t csl_cap1_ot_sample_before;
+    uint32_t csl_cap1_ot_sample_after;
+    uint32_t csl_cap1_ot_win_start;
+    uint32_t csl_cap1_ot_win_end;
+    uint32_t csl_cap1_ot_win_duration;
+    uint32_t csl_cap1_anchor_phase_us;
+    uint32_t csl_cap1_win_phase_us;
+    uint32_t csl_cap1_ie_phase_ten_symbols;
+    uint32_t csl_cap1_ie_anchor_lo;
+    uint32_t csl_cap1_ie_ref_mhr_grtc;
+    uint32_t csl_cap1_ie_sl_timer_grtc;
+    uint32_t csl_cap1_grtc_at_drx_sched;
+    uint32_t csl_cap1_drx_rx_time_lo;
+    uint32_t csl_cap1_drx_trigger_lo;
+    uint32_t csl_cap1_grtc_at_close;
+    uint32_t csl_cap1_hw_cc8_fire_grtc;
+    uint32_t csl_cap1_pred_cc8_fire_grtc;
+
+    /* First-two CSL IE capture (csl_phase_calc ok, anchor path). */
+    uint32_t csl_ie_cap_count;
+    uint32_t csl_ie_cap0_ref_mhr_grtc;      /* sl_timer+64 ≈ MHR @ RADIO.ADDRESS */
+    uint32_t csl_ie_cap0_sl_timer_grtc;     /* sl_timer before +64 */
+    uint32_t csl_ie_cap0_grtc_at_hook;      /* nrf54CslDebugGrtcNowUs() at calc */
+    uint32_t csl_ie_cap0_sl_minus_grtc_us;
+    uint32_t csl_ie_cap0_phase_ten_symbols;
+    uint32_t csl_ie_cap0_anchor_lo;
+    uint32_t csl_ie_cap0_us_to_next;
+    uint32_t csl_ie_cap0_period_at_calc;
+    uint32_t csl_ie_cap0_pred_sample_grtc; /* anchor at calc */
+    uint32_t csl_ie_cap0_mhr_plus_phase_us; /* ref_mhr + phase*160 (wrap) */
+    uint32_t csl_ie_cap1_ref_mhr_grtc;
+    uint32_t csl_ie_cap1_sl_timer_grtc;
+    uint32_t csl_ie_cap1_grtc_at_hook;
+    uint32_t csl_ie_cap1_sl_minus_grtc_us;
+    uint32_t csl_ie_cap1_phase_ten_symbols;
+    uint32_t csl_ie_cap1_anchor_lo;
+    uint32_t csl_ie_cap1_us_to_next;
+    uint32_t csl_ie_cap1_period_at_calc;
+    uint32_t csl_ie_cap1_pred_sample_grtc;
+    uint32_t csl_ie_cap1_mhr_plus_phase_us;
+
+    /* GRTC period probe: two consecutive OT sample points (expect last_csl_period_us). */
+    uint32_t csl_grtc_period_probe_valid;
+    uint32_t csl_grtc_probe0_sample_grtc;
+    uint32_t csl_grtc_probe1_sample_grtc;
+    uint32_t csl_grtc_probe_sample_delta;
+    uint32_t csl_grtc_probe0_close_grtc;
+    uint32_t csl_grtc_probe1_close_grtc;
+    uint32_t csl_grtc_probe_close_delta;
 } nrf54_debug_stats_t;
 
 extern volatile nrf54_debug_stats_t g_nrf54_debug_stats;
