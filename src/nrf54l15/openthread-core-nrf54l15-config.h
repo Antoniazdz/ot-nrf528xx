@@ -89,13 +89,16 @@
 #define RADIO_CONFIG_SRC_MATCH_EXT_ENTRY_NUM 0
 #endif
 
+/* AHEAD/AFTER match the nRF defconfig in NCS (nrf/subsys/net/openthread/Kconfig.defconfig): the
+ * 802.15.4 driver extends the DRX window itself once it detects a start of frame inside it. */
 #ifndef OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AHEAD
 #define OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AHEAD 104
 #endif
 
-/* Parity nRF52840: lead time for SubMac to call ReceiveAt before winStart (hw_task + main loop). */
+/* Lead time for SubMac to call ReceiveAt before winStart. Matches CONFIG_OPENTHREAD_CSL_RECEIVE_TIME_AHEAD
+ * in NCS (zephyr/modules/openthread/Kconfig.thread), which the nRF defconfig does not override. */
 #ifndef OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD
-#define OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD 2000
+#define OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD 5000
 #endif
 
 #ifndef OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER
@@ -104,6 +107,28 @@
 
 #ifndef OPENTHREAD_CONFIG_MAC_CSL_DEBUG_ENABLE
 #define OPENTHREAD_CONFIG_MAC_CSL_DEBUG_ENABLE 0
+#endif
+
+/**
+ * @def OPENTHREAD_CONFIG_MLE_CSL_ATTACH_FAIL_STOP_THREAD_ENABLE
+ *
+ * Stop Thread if the first Child Update Request after attach gets no Child Update Response (CSL sync failure).
+ */
+#ifndef OPENTHREAD_CONFIG_MLE_CSL_ATTACH_FAIL_STOP_THREAD_ENABLE
+#define OPENTHREAD_CONFIG_MLE_CSL_ATTACH_FAIL_STOP_THREAD_ENABLE 1
+#endif
+
+/**
+ * @def NRF54_CSL_KEEP_RADIO_AWAKE
+ *
+ * When set, the nRF54 radio platform skips sleep while CSL is enabled (`sCslPeriod > 0`):
+ * no sleep after DRX windows, after mesh TX, from `otPlatRadioSleep`, or `SetRxOnWhenIdle(false)`.
+ * Default 0 (NCS-like): platform may sleep after DRX windows and between CSL schedules.
+ * Set to 1 only for debug (keeps mesh RX; reproduces skipped_already_rx). Override at build:
+ * `-DNRF54_CSL_KEEP_RADIO_AWAKE=1` or env in `build-nrf54l15-cli-ftd-csl-debug`.
+ */
+#ifndef NRF54_CSL_KEEP_RADIO_AWAKE
+#define NRF54_CSL_KEEP_RADIO_AWAKE 0
 #endif
 
 /**

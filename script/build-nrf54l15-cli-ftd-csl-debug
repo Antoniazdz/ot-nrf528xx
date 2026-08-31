@@ -1,0 +1,102 @@
+#!/bin/bash
+#
+#  Copyright (c) 2020, The OpenThread Authors.
+#  All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+#  1. Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#  2. Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in the
+#     documentation and/or other materials provided with the distribution.
+#  3. Neither the name of the copyright holder nor the
+#     names of its contributors may be used to endorse or promote products
+#     derived from this software without specific prior written permission.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+#  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+#  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+#  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+#  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+#  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+#  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+#  POSSIBILITY OF SUCH DAMAGE.
+#
+# Debug preset: ot-cli-ftd + CSL receiver, OpenThread logs via SEGGER RTT (J-Link).
+# -DOT_CSL_DEBUG=ON keeps SubMac from calling Radio::Sleep (OT debug); platform sleep is separate.
+# NRF54_CSL_KEEP_RADIO_AWAKE defaults to 0 in openthread-core-nrf54l15-config.h (NCS-like).
+# A/B: NRF54_CSL_KEEP_RADIO_AWAKE=1 ./script/build-nrf54l15-cli-ftd-csl-debug
+#
+# Usage:
+#   ./script/build-nrf54l15-cli-ftd-csl-debug
+#   RTT_BUFFER_SIZE=16384 ./script/build-nrf54l15-cli-ftd-csl-debug
+#
+# Config A/B: OT_EXTRA_DEFINES is a ';'-separated list of MACRO=VALUE turned into -D flags for both
+# the OpenThread core and the platform (any macro with an #ifndef default in
+# openthread-core-nrf54l15-config.h). It is always passed to CMake, so it does not linger in the
+# cache between runs. Example:
+#   OT_EXTRA_DEFINES="OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AHEAD=5000;OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER=30000" \
+#       ./script/build-nrf54l15-cli-ftd-csl-debug
+#
+# Output:
+#   build-nrf54l15-cli-ftd-csl-debug/bin/ot-cli-ftd
+#
+# Flash:
+#   OT_CMAKE_BUILD_DIR=build-nrf54l15-cli-ftd-csl-debug ./script/flash-nrf54l15-cli-ftd-csl
+#
+# Logs (separate terminal from CLI UART):
+#   ./script/rtt-nrf54l15.sh
+
+set -euo pipefail
+
+OT_SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly OT_SRCDIR
+
+NRF_PLATFORM=nrf54l15
+OT_CMAKE_BUILD_DIR="${OT_CMAKE_BUILD_DIR:-build-nrf54l15-cli-ftd-csl-debug}"
+OT_NINJA_TARGET=ot-cli-ftd
+RTT_BUFFER_SIZE="${RTT_BUFFER_SIZE:-8192}"
+NRF54_CSL_KEEP_RADIO_AWAKE="${NRF54_CSL_KEEP_RADIO_AWAKE:-0}"
+OT_EXTRA_DEFINES="${OT_EXTRA_DEFINES:-}"
+
+OT_OPTIONS=(
+    "-DCMAKE_BUILD_TYPE=Debug"
+    "-DBUILD_TESTING=OFF"
+    "-DOT_PLATFORM=external"
+    "-DOT_SLAAC=ON"
+    "-DOT_COMPILE_WARNING_AS_ERROR=ON"
+    "-DNRF_PLATFORM=${NRF_PLATFORM}"
+    "-DCMAKE_TOOLCHAIN_FILE=src/${NRF_PLATFORM}/arm-none-eabi.cmake"
+    "-DOT_CSL_RECEIVER=ON"
+    "-DOT_CSL_DEBUG=ON"
+    "-DOT_APP_RCP=OFF"
+    "-DOT_APP_NCP=OFF"
+    "-DOT_ASSERT=ON"
+    "-DOT_DIAGNOSTIC=ON"
+    "-DOT_LOG_OUTPUT=PLATFORM_DEFINED"
+    "-DOT_FULL_LOGS=ON"
+    "-DOT_LOG_LEVEL_DYNAMIC=ON"
+    "-DRTT_BUFFER_SIZE=${RTT_BUFFER_SIZE}"
+    "-DNRF54_CSL_KEEP_RADIO_AWAKE=${NRF54_CSL_KEEP_RADIO_AWAKE}"
+    "-DNRF54_EXTRA_DEFINES=${OT_EXTRA_DEFINES}"
+)
+
+main()
+{
+    mkdir -p "${OT_SRCDIR}/${OT_CMAKE_BUILD_DIR}"
+    cd "${OT_SRCDIR}/${OT_CMAKE_BUILD_DIR}"
+
+    cmake -GNinja "${OT_OPTIONS[@]}" "$@" "${OT_SRCDIR}"
+    ninja "${OT_NINJA_TARGET}"
+
+    echo ""
+    echo "Built: ${OT_SRCDIR}/${OT_CMAKE_BUILD_DIR}/bin/${OT_NINJA_TARGET}"
+    echo "RTT up-buffer size: ${RTT_BUFFER_SIZE} (override with RTT_BUFFER_SIZE=...)"
+    echo "View logs: ./script/rtt-nrf54l15.sh"
+}
+
+main "$@"

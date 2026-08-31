@@ -40,6 +40,7 @@ set(NRF_COMM_SOURCES
     ${NRF_PLATFORM_DIR}/flash_nosd.c
     ${NRF_PLATFORM_DIR}/logging.c
     ${NRF_PLATFORM_DIR}/misc_nrf54.c
+    ${NRF_PLATFORM_DIR}/nrf54_debug_stats_dump.c
     ${NRF_PLATFORM_DIR}/ot_tasklet_wrap.c
     ${NRF_PLATFORM_DIR}/radio_nrf54.c
     ${NRF_PLATFORM_DIR}/system_nrf54.c
@@ -162,9 +163,14 @@ target_link_libraries(openthread-nrf54l15-sdk
         ot-config
 )
 
+if(NOT DEFINED NRF54_CSL_KEEP_RADIO_AWAKE)
+    set(NRF54_CSL_KEEP_RADIO_AWAKE 0)
+endif()
+
 target_compile_definitions(openthread-nrf54l15
     PUBLIC
         ${OT_PLATFORM_DEFINES}
+        NRF54_CSL_KEEP_RADIO_AWAKE=${NRF54_CSL_KEEP_RADIO_AWAKE}
 )
 
 target_compile_definitions(openthread-nrf54l15-transport

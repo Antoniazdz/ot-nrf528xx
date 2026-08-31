@@ -1,0 +1,128 @@
+#!/bin/bash
+#
+#  Copyright (c) 2020, The OpenThread Authors.
+#  All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+#  1. Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#  2. Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in the
+#     documentation and/or other materials provided with the distribution.
+#  3. Neither the name of the copyright holder nor the
+#     names of its contributors may be used to endorse or promote products
+#     derived from this software without specific prior written permission.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+#  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+#  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+#  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+#  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+#  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+#  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+#  POSSIBILITY OF SUCH DAMAGE.
+#
+# Flash NCS Thread CLI test firmware (nRF52840 DK) from ncs_hex/.
+#
+# Usage:
+#   ./script/flash-nrf52840-ncs-thread-cli
+#   ./script/flash-nrf52840-ncs-thread-cli <serial-number>
+#   ./script/flash-nrf52840-ncs-thread-cli /path/to/firmware.hex
+#
+# Environment:
+#   NCS_HEX                Hex file (default: bundled ncs_v3.0.0_thread_cli_test_…)
+#   NRF52840_SERIAL        J-Link serial (alias for NRFUTIL_SERIAL_NUMBER)
+#   NRFUTIL_SERIAL_NUMBER  J-Link serial (default: nRF52840 DK / PCA10056 via nrfutil)
+#   NRFUTIL_PROGRAM_OPTIONS  Default: chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM
+
+set -euo pipefail
+
+OT_SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly OT_SRCDIR
+
+DEFAULT_NCS_HEX="${OT_SRCDIR}/ncs_hex/ncs_v3.0.0_thread_cli_test_singleprotocol_nrf52840dk_nrf52840.hex"
+NCS_HEX="${NCS_HEX:-${DEFAULT_NCS_HEX}}"
+NRFUTIL_PROGRAM_OPTIONS="${NRFUTIL_PROGRAM_OPTIONS:-chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM}"
+
+die()
+{
+    echo " ** ERROR: $1" >&2
+    exit 1
+}
+
+require_cmd()
+{
+    command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
+}
+
+nrf52840_jlink_serial()
+{
+    nrfutil device list --json 2>/dev/null | python3 -c "
+import json, sys
+for line in sys.stdin:
+    try:
+        o = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if o.get('type') != 'info':
+        continue
+    for d in o.get('data', {}).get('devices', []):
+        if (d.get('devkit') or {}).get('boardVersion') == 'PCA10056':
+            sn = d.get('serialNumber', '')
+            print(sn.lstrip('0') or sn)
+            sys.exit(0)
+sys.exit(1)
+" || die "No nRF52840 DK (PCA10056) found. Connect one or set NRFUTIL_SERIAL_NUMBER."
+}
+
+program_with_recover()
+{
+    local serial="$1"
+    local hex="$2"
+
+    if ! nrfutil device program \
+        --firmware "${hex}" \
+        --serial-number "${serial}" \
+        --options "${NRFUTIL_PROGRAM_OPTIONS}" 2>&1; then
+        echo "Program failed (often AP-Protect); recovering..."
+        nrfutil device recover --serial-number "${serial}"
+        nrfutil device program \
+            --firmware "${hex}" \
+            --serial-number "${serial}" \
+            --options "${NRFUTIL_PROGRAM_OPTIONS}"
+    fi
+}
+
+main()
+{
+    local arg="${1:-}"
+    local serial="${NRF52840_SERIAL:-${NRFUTIL_SERIAL_NUMBER:-}}"
+
+    require_cmd nrfutil
+    require_cmd python3
+
+    if [[ -n "${arg}" && "${arg}" != *.hex && "${arg}" =~ ^[0-9]+$ ]]; then
+        serial="${arg}"
+        arg=""
+    elif [[ -n "${arg}" && "${arg}" == *.hex ]]; then
+        NCS_HEX="${arg}"
+        arg=""
+    fi
+
+    [[ -f "${NCS_HEX}" ]] || die "Missing firmware: ${NCS_HEX}"
+
+    if [[ -z "${serial}" ]]; then
+        serial="$(nrf52840_jlink_serial)"
+    fi
+
+    echo "Programming ${NCS_HEX}"
+    echo "Device serial: ${serial} (nRF52840 DK / PCA10056)"
+    program_with_recover "${serial}" "${NCS_HEX}"
+    echo "Done."
+}
+
+main "$@"

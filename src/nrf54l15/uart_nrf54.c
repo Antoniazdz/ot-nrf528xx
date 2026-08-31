@@ -41,6 +41,7 @@
 
 #include <utils/code_utils.h>
 #include <utils/uart.h>
+#include <openthread/platform/time.h>
 #include <openthread/platform/toolchain.h>
 
 #include "openthread-system.h"
@@ -56,6 +57,13 @@
  * UART enable flag.
  */
 bool sUartEnabled = false;
+
+/**
+ * Upper bound for a busy wait on a transfer in progress. One transfer is at most
+ * the size of the CLI TX ring, ~180 ms at the slowest supported baud rate, so this
+ * only trips when ENDTX never arrives.
+ */
+#define UART_TX_WAIT_TIMEOUT_US 250000
 
 /**
  * UART TX buffer variables.
@@ -165,6 +173,41 @@ exit:
 }
 
 /**
+ * Function for waiting until the transfer in progress leaves the UARTE.
+ *
+ * @retval true   Transmission completed.
+ * @retval false  Timed out, the transaction has to be dropped.
+ */
+static bool waitTransmitDone(void)
+{
+    uint64_t deadline = otPlatTimeGet() + UART_TX_WAIT_TIMEOUT_US;
+
+    while (!sTransmitDone && otPlatTimeGet() < deadline)
+    {
+        // Wait until the transmission is done.
+    }
+
+    return sTransmitDone;
+}
+
+/**
+ * Function for closing the transaction in progress without reporting it, i.e.
+ * without calling otPlatUartSendDone().
+ */
+static void reapTransmit(void)
+{
+    otEXPECT(sTransmitBuffer != NULL);
+
+    (void)waitTransmitDone();
+
+    sTransmitBuffer = NULL;
+    sTransmitDone   = false;
+
+exit:
+    return;
+}
+
+/**
  * Function for notifying application about transmission being done.
  */
 static void processTransmit(void)
@@ -185,14 +228,29 @@ exit:
 
 otError otPlatUartFlush(void)
 {
-    while (sTransmitBuffer && !sTransmitDone)
-    {
-        // Wait until the transmission is done
-    }
-
-    processTransmit();
+    /* Only wait for the data to go out: the caller reports the completion to
+     * OpenThread itself (see cli_uart.cpp). Calling otPlatUartSendDone() here as
+     * well made the CLI advance its TX ring twice and skip a chunk of output. */
+    reapTransmit();
 
     return OT_ERROR_NONE;
+}
+
+void nrf5UartDrainTx(void)
+{
+    /* Wait for everything the CLI has queued, reporting each transfer so that the
+     * CLI hands over its next chunk. For callers that, unlike cli_uart.cpp, do not
+     * run otPlatUartSendDone() on their own. */
+    while (sTransmitBuffer != NULL)
+    {
+        if (!waitTransmitDone())
+        {
+            sTransmitBuffer = NULL;
+            break;
+        }
+
+        processTransmit();
+    }
 }
 
 void nrf5UartProcess(void)
@@ -327,10 +385,13 @@ exit:
 otError otPlatUartSend(const uint8_t *aBuf, uint16_t aBufLength)
 {
     otError error = OT_ERROR_NONE;
-    if (sTransmitBuffer && !sTransmitDone)
-    {
-        otPlatUartFlush();
-    }
+
+    /* A caller handing over a new buffer has already accounted for the previous
+     * one, so close that transaction silently instead of reporting it again from
+     * here: the report would start a nested transfer and this buffer would then be
+     * rejected as busy and lost. */
+    reapTransmit();
+
     otEXPECT_ACTION(sTransmitBuffer == NULL, error = OT_ERROR_BUSY);
 
     // Set up transmit buffer.

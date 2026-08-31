@@ -325,6 +325,14 @@
 
      }
 
+#if NRF_GRTC_HAS_CLKSEL
+    /* The system LFCLK the GRTC selects by default (and that nrfx_grtc_init() reselects
+     * through NRFX_GRTC_CONFIG_LFCLK_SELECT_AT_INIT) is served from LFLPRC, which runs
+     * ~7500 ppm fast and walks the CSL anchor by milliseconds per second. Bind the
+     * SYSCOUNTER to the crystal instead, as NCS does. Must follow nrfx_grtc_init(). */
+    nrfx_grtc_clock_source_set(NRF_GRTC_CLKSEL_LFXO);
+#endif
+
      GrtcSyscounterEnsureStarted();
      #if OT_GRTC_ALWAYS_ON
     nrfx_grtc_active_request_set(true);
