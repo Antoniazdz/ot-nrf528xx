@@ -148,6 +148,16 @@ void nrf54DebugStatsDumpHandoffEmit(Nrf54StatsEmitLineFn aEmit, void *aContext)
     STAT_EMIT(csl_sleep_force_rx_terminate);
     STAT_EMIT(csl_receive_at_post_schedule_sleep);
 
+    emit_line(aEmit, aContext, "--- window rejected before scheduling ---");
+    STAT_EMIT(csl_plat_win_in_past);
+    STAT_EMIT(drx_receive_fail_duplicate_id);
+    STAT_EMIT(drx_receive_fail_no_slot);
+    STAT_EMIT(drx_receive_fail_rsch);
+    /* Did the cancel that precedes every re-request drop a window still pending? */
+    STAT_EMIT(drx_scheduled_cancel_enter);
+    STAT_EMIT(drx_scheduled_cancel_not_found);
+    STAT_EMIT(drx_scheduled_cancel_ok);
+
     emit_line(aEmit, aContext, "--- DRX schedule / fire ---");
     STAT_EMIT(drx_receive_enter);
     STAT_EMIT(drx_receive_ok);
