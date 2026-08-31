@@ -109,6 +109,21 @@ class OtCli:
         self._ser.write(b"\r\n")
         time.sleep(0.2)
 
+    @staticmethod
+    def _is_ot_cli_done(output: str) -> bool:
+        """True when OpenThread CLI finished a command (Done line or Error N:)."""
+        if OtCli._has_cli_error(output):
+            return True
+        # Done as its own line; allow CR/LF quirks from UART.
+        if re.search(r"(?:^|\r?\n)Done(?:\r?\n|\r|$)", output):
+            return True
+        # Chunk may end mid-line before trailing newline arrives.
+        return output.rstrip("\r\n").endswith("Done")
+
+    @staticmethod
+    def _is_handoff_stats_complete(output: str) -> bool:
+        return "nrf54_handoff_end=1" in output
+
     def _read_loop(self) -> None:
         while not self._stop.is_set():
             try:
@@ -124,7 +139,12 @@ class OtCli:
             with self._cmd_lock:
                 if self._cmd_active:
                     self._cmd_buf.append(text)
-                    if "Done" in text or self._has_cli_error(text):
+                    joined = "".join(self._cmd_buf)
+                    if (
+                        "Done" in text
+                        or self._is_ot_cli_done(joined)
+                        or self._is_handoff_stats_complete(joined)
+                    ):
                         self._cmd_done.set()
 
     @staticmethod
@@ -136,15 +156,24 @@ class OtCli:
             self._cmd_active = True
             self._cmd_buf = []
             self._cmd_done.clear()
+        # Drop stale RX so a prior Done/prompt cannot complete the wrong command.
+        self._ser.reset_input_buffer()
         line = f"{self._prefix}{cmd}\r\n"
         self._ser.write(line.encode())
+        self._ser.flush()
         if not self._cmd_done.wait(timeout=timeout):
             with self._cmd_lock:
+                partial = "".join(self._cmd_buf)
                 self._cmd_active = False
-            fail(f"Timeout waiting for CLI response to '{cmd}' on {self._name}")
+            hint = partial[-200:] if partial else "(no bytes captured)"
+            fail(
+                f"Timeout waiting for CLI response to '{cmd}' on {self._name} "
+                f"(last RX: {hint!r})"
+            )
         with self._cmd_lock:
             text = "".join(self._cmd_buf)
             self._cmd_active = False
+            self._cmd_done.clear()
         if not allow_error and self._has_cli_error(text):
             fail(f"CLI error for command '{cmd}' on {self._name}:\n{text}")
         return text
@@ -318,6 +347,35 @@ def assert_ping_success(output: str) -> None:
     fail(f"Unexpected ping output:\n{output}")
 
 
+def dump_child_nrf54_stats(child: OtCli) -> None:
+    """Dump g_nrf54_debug_stats on the nRF54 child (UART + RTT). Uses diag nrf54stats."""
+    print("\n=== Child: nrf54 debug stats ===")
+    diag_started = False
+    try:
+        print("> diag start")
+        child.command("diag start", allow_error=True, timeout=10)
+        diag_started = True
+        print("> diag nrf54stats handoff")
+        try:
+            # Handoff counters only, one UART transaction per line. Full: diag nrf54stats full
+            child.command("diag nrf54stats handoff", allow_error=True, timeout=60.0)
+        except TestFailure as exc:
+            print(f" ** WARNING: 'diag nrf54stats' failed: {exc}", file=sys.stderr)
+            print(
+                " ** Hint: reflash child with ./script/flash-nrf54l15-cli-ftd-csl-debug",
+                file=sys.stderr,
+            )
+    except TestFailure as exc:
+        print(f" ** WARNING: diag start failed: {exc}", file=sys.stderr)
+    finally:
+        if diag_started:
+            print("> diag stop")
+            try:
+                child.command("diag stop", allow_error=True, timeout=10)
+            except TestFailure as exc:
+                print(f" ** WARNING: diag stop failed: {exc}", file=sys.stderr)
+
+
 def shutdown_boards(child: OtCli | None, leader: OtCli | None) -> None:
     if child is None and leader is None:
         return
@@ -336,6 +394,7 @@ def shutdown_boards(child: OtCli | None, leader: OtCli | None) -> None:
                 print(f" ** WARNING: shutdown '{cmd}' on {label} failed: {exc}", file=sys.stderr)
 
     if child is not None:
+        dump_child_nrf54_stats(child)
         print("\n=== Child: factoryreset (clean state for next run) ===")
         try:
             child.factory_reset(strict=False)

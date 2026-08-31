@@ -62,6 +62,7 @@
 
 #include <nrf.h>
 #include <nrf_802154.h>
+#include <nrf_802154_common_utils.h>
 #include <nrf_802154_pib.h>
 #include "nrf_802154_core.h"
 #include "platform/nrf_802154_clock.h"
@@ -76,8 +77,8 @@
 #define US_PER_MS             1000ULL      ///< Microseconds in millisecond.
 
 #define RSSI_SETTLE_TIME_US   40           ///< RSSI settle time in microseconds.
-#define SAFE_DELTA            1000         ///< Head-start before winStart (parity nRF52840 radio.c).
 #define DRX_SLOT_RX           0            ///< Delayed reception window ID for CSL.
+#define PHR_DURATION_US       32           ///< Duration of the PHR field.
 
 #define CSL_UNCERT            20           ///< The Uncertainty of the scheduling CSL of transmission by the parent, in ±10 us units.
 
@@ -198,10 +199,9 @@ static int8_t GetTransmitPowerForChannel(uint8_t aChannel)
     return power;
 }
 
+/* The driver timestamps the end of the last symbol; OT expects the start of the PHR. */
 static uint64_t GetRxTimestamp(uint64_t aTime, uint8_t aLength)
 {
-    OT_UNUSED_VARIABLE(aLength);
-
     if (aTime == NRF_802154_NO_TIMESTAMP)
     {
         g_nrf54_debug_stats.rx_no_timestamp++;
@@ -209,7 +209,7 @@ static uint64_t GetRxTimestamp(uint64_t aTime, uint8_t aLength)
     }
 
     g_nrf54_debug_stats.rx_timestamp_ok++;
-    return aTime;
+    return nrf_802154_timestamp_end_to_phr_convert(aTime, aLength);
 }
 
 static void dataInit(void)
@@ -289,9 +289,76 @@ static void resetPendingEvent(RadioPendingEvents aEvent)
 }
 
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+static inline bool nrf54CslSuppressPlatformSleep(void)
+{
+#if NRF54_CSL_KEEP_RADIO_AWAKE
+    return sCslPeriod > 0;
+#else
+    return false;
+#endif
+}
+
+static void nrf54CslRecordSleepSuppressed(void)
+{
+    g_nrf54_debug_stats.csl_platform_sleep_suppressed++;
+}
+
+/**
+ * Enter driver sleep for sleepy CSL child (NCS contract). Uses sleep_if_idle first;
+ * if still in mesh RX, terminate with nrf_802154_sleep() so DRX core_receive is not skipped.
+ *
+ * @returns true if radio is in sleep (or was already).
+ */
+static bool nrf54CslTryEnterSleep(bool aCountWindowEnd)
+{
+    nrf_802154_sleep_error_t err;
+
+    err = nrf_802154_sleep_if_idle();
+
+    if (err == NRF_802154_SLEEP_ERROR_NONE)
+    {
+        nrf5FemDisable();
+        SetRadioDriverState(NRF_802154_STATE_SLEEP);
+
+        if (aCountWindowEnd)
+        {
+            g_nrf54_debug_stats.csl_sleep_after_window++;
+        }
+
+        return true;
+    }
+
+    if (sCslPeriod > 0 && !sRxOnWhenIdle)
+    {
+        err = nrf_802154_sleep();
+
+        if (err == NRF_802154_SLEEP_ERROR_NONE)
+        {
+            g_nrf54_debug_stats.csl_sleep_force_rx_terminate++;
+            nrf5FemDisable();
+            SetRadioDriverState(NRF_802154_STATE_SLEEP);
+
+            if (aCountWindowEnd)
+            {
+                g_nrf54_debug_stats.csl_sleep_after_window++;
+            }
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /* CSL-P0-F3b: after poll on mesh channel, leave HW RX so DRX callback is not skipped. */
 static void cslScheduleSleepIfChildRxOff(void)
 {
+    if (nrf54CslSuppressPlatformSleep())
+    {
+        nrf54CslRecordSleepSuppressed();
+        return;
+    }
+
     if ((sCslPeriod > 0) && !sRxOnWhenIdle && !IsRadioDriverStateSleep())
     {
         g_nrf54_debug_stats.csl_sleep_after_poll_schedule++;
@@ -565,11 +632,17 @@ otError otPlatRadioSleep(otInstance *aInstance)
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    if (nrf_802154_sleep_if_idle() == NRF_802154_SLEEP_ERROR_NONE)
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+    if (nrf54CslSuppressPlatformSleep())
     {
-        nrf5FemDisable();
+        nrf54CslRecordSleepSuppressed();
+        return OT_ERROR_NONE;
+    }
+#endif
+
+    if (nrf54CslTryEnterSleep(false))
+    {
         clearPendingEvents();
-        SetRadioDriverState(NRF_802154_STATE_SLEEP);
     }
     else
     {
@@ -620,11 +693,9 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
 
     bool     result;
     bool     cancelOk;
-    uint64_t nowUsFull  = otPlatTimeGet();
-    uint32_t nowUs      = (uint32_t)nowUsFull;
-    int32_t  leadUs     = (int32_t)(aStart - nowUs);
-    uint64_t rxTime     = unwrapFutureRadioTimeUs(aStart - SAFE_DELTA);
-    uint32_t rxDuration = aDuration + SAFE_DELTA;
+    uint32_t nowUs  = (uint32_t)otPlatTimeGet();
+    int32_t  leadUs = (int32_t)(aStart - nowUs);
+    uint64_t rxTime = unwrapFutureRadioTimeUs(aStart);
 
     g_nrf54_debug_stats.csl_receive_at_enter++;
     g_nrf54_debug_stats.last_csl_channel                      = aChannel;
@@ -637,23 +708,17 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
     g_nrf54_debug_stats.last_driver_state_at_csl_receive_at   = (uint32_t)sDriverState;
     g_nrf54_debug_stats.last_rx_on_when_idle_at_csl_receive_at = sRxOnWhenIdle ? 1U : 0U;
 
+    /* A window in the past is not rejected here: parity with NCS radio_nrf5.c, where a late call
+     * still lets the driver decide and keeps the CSL anchor at anchor_time + n * csl_period.
+     * The first window after CSL is enabled and the one from RestartCslTimerAfterSyncUpdate() are
+     * in the past by construction. */
     if (leadUs < 0)
     {
         g_nrf54_debug_stats.csl_plat_win_in_past++;
         g_nrf54_debug_stats.last_csl_plat_win_past_by_us = (uint32_t)(-leadUs);
-        g_nrf54_debug_stats.csl_receive_at_fail++;
-        return OT_ERROR_FAILED;
     }
 
-    if (rxTime < nowUsFull)
-    {
-        g_nrf54_debug_stats.csl_plat_win_in_past++;
-        g_nrf54_debug_stats.last_csl_plat_win_past_by_us = (uint32_t)(nowUsFull - rxTime);
-        g_nrf54_debug_stats.csl_receive_at_fail++;
-        return OT_ERROR_FAILED;
-    }
-
-    if ((uint32_t)leadUs < 400U)
+    if (leadUs < 400)
     {
         g_nrf54_debug_stats.csl_plat_win_lead_short++;
     }
@@ -677,12 +742,19 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
         g_nrf54_debug_stats.csl_scheduled_cancel_ret_false++;
     }
 
-    result = nrf_802154_receive_at(rxTime, rxDuration, aChannel, DRX_SLOT_RX);
+    result = nrf_802154_receive_at(rxTime, aDuration, aChannel, DRX_SLOT_RX);
     clearPendingEvents();
 
     if (result)
     {
         g_nrf54_debug_stats.csl_receive_at_ok++;
+
+        /* After DRX is scheduled, drop mesh RX (not sleep before receive_at — that kills lptimer). */
+        if (!sRxOnWhenIdle && sDriverState == NRF_802154_STATE_RECEIVE)
+        {
+            g_nrf54_debug_stats.csl_receive_at_post_schedule_sleep++;
+            setPendingEvent(kPendingEventSleep);
+        }
     }
     else
     {
@@ -893,7 +965,16 @@ void otPlatRadioSetRxOnWhenIdle(otInstance *aInstance, bool aEnable)
     else
     {
         g_nrf54_debug_stats.rx_on_when_idle_set_false++;
-        (void)nrf_802154_sleep_if_idle();
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+        if (nrf54CslSuppressPlatformSleep())
+        {
+            nrf54CslRecordSleepSuppressed();
+        }
+        else
+#endif
+        {
+            (void)nrf54CslTryEnterSleep(false);
+        }
     }
 }
 
@@ -1220,11 +1301,17 @@ void nrf5RadioProcess(otInstance *aInstance)
 
     if (isPendingEventSet(kPendingEventSleep))
     {
-        if (nrf_802154_sleep_if_idle() == NRF_802154_SLEEP_ERROR_NONE)
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+        if (nrf54CslSuppressPlatformSleep())
         {
-            nrf5FemDisable();
+            nrf54CslRecordSleepSuppressed();
             resetPendingEvent(kPendingEventSleep);
-            SetRadioDriverState(NRF_802154_STATE_SLEEP);
+        }
+        else
+#endif
+        if (nrf54CslTryEnterSleep(true))
+        {
+            resetPendingEvent(kPendingEventSleep);
         }
         else
         {
@@ -1324,6 +1411,13 @@ void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
         sAckedWithSecEnhAck = false;
 #endif
 
+        if (nrf54CslSuppressPlatformSleep())
+        {
+            nrf54CslRecordSleepSuppressed();
+            otSysEventSignalPending();
+            return;
+        }
+
         /* CSL-P0-F3a: NCS/baseline contract — sleep after CSL window for all children
          * (including rx-off sleepy child). Replaces early return that blocked sleep. */
         g_nrf54_debug_stats.csl_drx_timeout_schedule_sleep++;
@@ -1377,7 +1471,16 @@ void nrf_802154_receive_failed(nrf_802154_rx_error_t error, uint32_t id)
     if ((error == NRF_802154_RX_ERROR_DELAYED_TIMEOUT) || (error == NRF_802154_RX_ERROR_TIMESLOT_ENDED))
     {
         sReceiveError = OT_ERROR_NONE;
-        setPendingEvent(kPendingEventSleep);
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
+        if (nrf54CslSuppressPlatformSleep())
+        {
+            nrf54CslRecordSleepSuppressed();
+        }
+        else
+#endif
+        {
+            setPendingEvent(kPendingEventSleep);
+        }
     }
     else
 #endif
@@ -1728,7 +1831,11 @@ void otPlatRadioUpdateCslSampleTime(otInstance *aInstance, uint32_t aCslSampleTi
     g_nrf54_debug_stats.last_update_csl_sample_time = aCslSampleTime;
     sCslSampleTime = aCslSampleTime;
 #if NRF_802154_DELAYED_TRX_ENABLED && NRF_802154_IE_WRITER_ENABLED
-    nrf_802154_csl_writer_anchor_time_set(unwrapFutureRadioTimeUs(aCslSampleTime));
+    /* The CSL sample time points to the start of the MAC header, while the expected RX time refers
+     * to the end of the SFD. */
+    uint64_t expectedRxTime = unwrapFutureRadioTimeUs(aCslSampleTime - PHR_DURATION_US);
+
+    nrf_802154_csl_writer_anchor_time_set(nrf_802154_timestamp_phr_to_mhr_convert(expectedRxTime));
 #endif
 }
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE

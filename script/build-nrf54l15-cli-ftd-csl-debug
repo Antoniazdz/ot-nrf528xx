@@ -27,6 +27,9 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 #
 # Debug preset: ot-cli-ftd + CSL receiver, OpenThread logs via SEGGER RTT (J-Link).
+# -DOT_CSL_DEBUG=ON keeps SubMac from calling Radio::Sleep (OT debug); platform sleep is separate.
+# NRF54_CSL_KEEP_RADIO_AWAKE defaults to 0 in openthread-core-nrf54l15-config.h (NCS-like).
+# A/B: NRF54_CSL_KEEP_RADIO_AWAKE=1 ./script/build-nrf54l15-cli-ftd-csl-debug
 #
 # Usage:
 #   ./script/build-nrf54l15-cli-ftd-csl-debug
@@ -50,6 +53,7 @@ NRF_PLATFORM=nrf54l15
 OT_CMAKE_BUILD_DIR="${OT_CMAKE_BUILD_DIR:-build-nrf54l15-cli-ftd-csl-debug}"
 OT_NINJA_TARGET=ot-cli-ftd
 RTT_BUFFER_SIZE="${RTT_BUFFER_SIZE:-8192}"
+NRF54_CSL_KEEP_RADIO_AWAKE="${NRF54_CSL_KEEP_RADIO_AWAKE:-0}"
 
 OT_OPTIONS=(
     "-DCMAKE_BUILD_TYPE=Debug"
@@ -69,6 +73,7 @@ OT_OPTIONS=(
     "-DOT_FULL_LOGS=ON"
     "-DOT_LOG_LEVEL_DYNAMIC=ON"
     "-DRTT_BUFFER_SIZE=${RTT_BUFFER_SIZE}"
+    "-DNRF54_CSL_KEEP_RADIO_AWAKE=${NRF54_CSL_KEEP_RADIO_AWAKE}"
 )
 
 main()

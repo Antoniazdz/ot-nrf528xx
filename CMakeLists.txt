@@ -42,6 +42,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 
+set(OT_CLI_VENDOR_EXTENSION "${PROJECT_SOURCE_DIR}/src/nrf54l15/nrf54_cli_vendor.cmake" CACHE STRING "nRF54 CLI vendor extension" FORCE)
+
 add_subdirectory(openthread)
 
 target_compile_definitions(ot-config INTERFACE

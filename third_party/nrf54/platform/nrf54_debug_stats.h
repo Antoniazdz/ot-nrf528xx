@@ -253,6 +253,10 @@ typedef struct
     uint32_t csl_drx_timeout_rx_off_skip; /* deprecated: pre-P0-F3a path */
     uint32_t csl_drx_timeout_schedule_sleep;
     uint32_t csl_sleep_after_poll_schedule; /* CSL-P0-F3b: sleep after poll TX done */
+    uint32_t csl_sleep_after_window;        /* F3a: DRX timeout → sleep succeeded */
+    uint32_t csl_sleep_force_rx_terminate;  /* sleep_if_idle failed → nrf_802154_sleep() */
+    uint32_t csl_receive_at_post_schedule_sleep; /* mesh RX cleared after receive_at OK */
+    uint32_t csl_platform_sleep_suppressed; /* NRF54_CSL_KEEP_RADIO_AWAKE */
     uint32_t csl_drx_receive_failed_other;
 
     /* nrf_802154_core switch_to_idle(). */

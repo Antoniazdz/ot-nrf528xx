@@ -129,6 +129,7 @@ foreach(_nrf802154_lib
     target_include_directories(${_nrf802154_lib}
         PRIVATE
             ${NRF54_SDK_INCLUDES}
+            ${NRF54_ROOT}/platform
             ${NRF54_802154_ROOT}/sl/sl_opensource/include
             ${PROJECT_SOURCE_DIR}/src/nrf54l15
     )
