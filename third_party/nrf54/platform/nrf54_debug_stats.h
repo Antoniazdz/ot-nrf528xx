@@ -282,6 +282,14 @@ typedef struct
     uint32_t last_csl_phase;                 /* returned phase (ten-symbols + 1) */
     uint32_t update_csl_sample_time_enter;
     uint32_t last_update_csl_sample_time;    /* arg to otPlatRadioUpdateCslSampleTime */
+
+    /* nrf_802154_ie_writer: what the driver advertises to the CSL parent. Sampled in
+     * csl_phase_calc(), i.e. in the RADIO.ADDRESS handler of every transmission. */
+    uint32_t csl_ie_phase_calc_anchor_path;  /* anchor known, phase from anchor_time */
+    uint32_t csl_ie_phase_calc_fallback;     /* anchor unknown, phase from DRX midpoint */
+    uint32_t last_csl_ie_ref_time;           /* reference time used (MHR of this frame) */
+    uint32_t last_csl_ie_anchor;             /* anchor_time the phase was measured from */
+    uint32_t last_csl_ie_phase_us;           /* resulting phase before rounding, in us */
 } nrf54_debug_stats_t;
 
 extern volatile nrf54_debug_stats_t g_nrf54_debug_stats;

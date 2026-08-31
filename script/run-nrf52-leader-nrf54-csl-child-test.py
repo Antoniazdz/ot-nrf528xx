@@ -151,6 +151,35 @@ class OtCli:
     def _has_cli_error(output: str) -> bool:
         return re.search(r"Error \d+:", output) is not None
 
+    def shell_write(self, cmd: str, settle: float = 0.4) -> None:
+        """Send a bare shell command (no OpenThread prefix) that answers with no 'Done'."""
+        self._ser.write(f"{cmd}\r\n".encode())
+        self._ser.flush()
+        time.sleep(settle)
+
+    def sync(self, attempts: int = 5) -> None:
+        """Wait until the CLI answers, and leave diagnostics mode if a previous run left it there.
+
+        Right after the VCOM is (re)opened the board sometimes swallows the first command,
+        and an aborted run can leave the device in diag mode where everything else fails
+        with InvalidState. Both turn into a wall of timeouts further down.
+        """
+        for attempt in range(attempts):
+            self._wake()
+            try:
+                out = self.command("state", timeout=3.0, allow_error=True)
+            except TestFailure:
+                continue
+
+            if "diagnostics mode" in out:
+                self.command("diag stop", timeout=5.0, allow_error=True)
+
+            if attempt > 0:
+                print(f"  {self._name}: CLI responded after {attempt + 1} attempts.")
+            return
+
+        raise TestFailure(f"{self._name} CLI is not responding")
+
     def command(self, cmd: str, timeout: float = 15.0, allow_error: bool = False) -> str:
         with self._cmd_lock:
             self._cmd_active = True
@@ -435,6 +464,13 @@ def main() -> None:
         default=15.0,
         help="Per-ping session timeout passed to OpenThread CLI (seconds).",
     )
+    parser.add_argument(
+        "--leader-log-level",
+        type=int,
+        default=None,
+        help="OpenThread log level to set on the leader for the ping phase (needs a leader built "
+        "from source with dynamic log level). Setup runs at level 1 so responses stay parseable.",
+    )
     parser.add_argument("--post-start-sleep", type=float, default=5.0)
     parser.add_argument(
         "--quiet",
@@ -468,7 +504,19 @@ def main() -> None:
         print(f"nRF52840 DK: serial {nrf52.serial}, CLI {nrf52.port} @ 115200 (ot prefix)")
         print(f"nRF54L15 DK: serial {nrf54.serial}, CLI {nrf54.port} @ 1000000")
 
-        leader = OtCli("leader", nrf52.port, 115200, prefix="ot ", log_output=not args.quiet)
+        # The NCS shell on the nRF52840 DK runs its UART with hardware flow control; without
+        # RTS/CTS the board intermittently stops sending and every command times out.
+        leader = OtCli("leader", nrf52.port, 115200, prefix="ot ", rtscts=True, log_output=not args.quiet)
+        leader.sync()
+
+        # A leader built from source logs at DEBG from boot, which drowns the command
+        # responses this script parses. Keep only the OpenThread stack module, and keep
+        # even that quiet until the traffic of interest.
+        if args.leader_log_level is not None:
+            print("> log disable / log enable dbg net_openthread / ot log level 1")
+            leader.shell_write("log disable")
+            leader.shell_write("log enable dbg net_openthread")
+            leader.command("log level 1", allow_error=True)
 
         print(f"\n=== Leader (nRF52840): form network on channel {args.channel} ===")
         for cmd in (
@@ -494,6 +542,7 @@ def main() -> None:
 
         print("\n=== Child (nRF54L15): join with CSL ===")
         child = OtCli("child", nrf54.port, 1000000, prefix="", rtscts=False, log_output=not args.quiet)
+        child.sync()
 
         for cmd in (
             "thread stop",
@@ -520,6 +569,10 @@ def main() -> None:
         print(f"Child RLOC 0x{child_rloc}, MLEID {child_mleid}")
 
         ping_cmd = f"ping {child_mleid} 16 {args.ping_count} 1 64 {args.ping_timeout}"
+        if args.leader_log_level is not None:
+            print(f"> ot log level {args.leader_log_level}")
+            leader.command(f"log level {args.leader_log_level}", allow_error=True)
+
         print(f"\n=== Leader ping child ({args.ping_count} echo request(s)) ===")
         print(f"> ot {ping_cmd}")
         ping_out = leader.command(

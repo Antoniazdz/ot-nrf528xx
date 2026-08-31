@@ -167,6 +167,14 @@ void nrf54DebugStatsDumpHandoffEmit(Nrf54StatsEmitLineFn aEmit, void *aContext)
     STAT_EMIT(last_core_state_at_drx_receive_attempt);
     STAT_EMIT(last_core_state_at_delayed_skip_rx);
 
+    emit_line(aEmit, aContext, "--- CSL IE advertised to parent ---");
+    STAT_EMIT(csl_ie_phase_calc_anchor_path);
+    STAT_EMIT(csl_ie_phase_calc_fallback);
+    STAT_EMIT(last_csl_ie_ref_time);
+    STAT_EMIT(last_csl_ie_anchor);
+    STAT_EMIT(last_csl_ie_phase_us);
+    STAT_EMIT(last_update_csl_sample_time);
+
     emit_line(aEmit, aContext, "--- idle / hw_task ---");
     STAT_EMIT(csl_sleep_after_window);
     STAT_EMIT(hw_task_prepare_ok);

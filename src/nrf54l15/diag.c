@@ -44,10 +44,12 @@
 #include <openthread/platform/alarm-milli.h>
 #include <openthread/platform/diag.h>
 #include <openthread/platform/radio.h>
+#include <openthread/platform/time.h>
 #include <openthread/platform/toolchain.h>
 
 #include <common/logging.hpp>
 #include <nrf_802154.h>
+#include <nrf_802154_sl_timer.h>
 #include <utils/code_utils.h>
 
 #include "nrf54_debug_stats_dump.h"
@@ -309,6 +311,39 @@ exit:
     return error;
 }
 
+/**
+ * Reads the two time bases that CSL depends on back to back: the one OpenThread
+ * schedules the sample windows in, and the one the 802.15.4 driver stamps the CSL
+ * phase with. They have to agree, otherwise the phase advertised to the parent is
+ * off by their difference.
+ */
+static otError processNrf54Clock(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[])
+{
+    otError error = OT_ERROR_NONE;
+
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(aArgsLength);
+    OT_UNUSED_VARIABLE(aArgs);
+
+    otEXPECT_ACTION(otPlatDiagModeGet(), error = OT_ERROR_INVALID_STATE);
+
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        uint64_t ot0 = otPlatTimeGet();
+        uint64_t sl  = nrf_802154_sl_timer_current_time_get();
+        uint64_t ot1 = otPlatTimeGet();
+
+        /* Truncated to 32 bits: the platform printf has no long long support and the
+         * difference of interest is milliseconds, far below the wrap. */
+        diagOutput("nrf54_clock ot=%lu sl=%lu ot_after=%lu delta=%ld\r\n", (unsigned long)ot0, (unsigned long)sl,
+                   (unsigned long)ot1, (long)((int64_t)sl - (int64_t)ot0));
+        nrf5UartDrainTx();
+    }
+
+exit:
+    return error;
+}
+
 static otError processTemp(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[])
 {
     OT_UNUSED_VARIABLE(aInstance);
@@ -369,6 +404,7 @@ exit:
 const struct PlatformDiagCommand sCommands[] = {{"ccathreshold", &processCcaThreshold},
                                                 {"id", &processID},
                                                 {"listen", &processListen},
+                                                {"nrf54clock", &processNrf54Clock},
                                                 {"nrf54stats", &processNrf54Stats},
                                                 {"temp", &processTemp},
                                                 {"transmit", &processTransmit}};
