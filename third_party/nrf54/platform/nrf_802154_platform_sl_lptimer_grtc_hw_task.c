@@ -22,7 +22,6 @@
 
 #include "platform/nrf_802154_platform_sl_lptimer.h"
 #include "platform_gppi_nrf54l.h"
-#include "nrf54_debug_stats.h"
 
 static nrfx_gppi_handle_t m_peri_rad_handle;
 static uint32_t           m_ppib_chan;
@@ -89,11 +88,8 @@ void nrf_802154_platform_sl_lptimer_hw_task_local_domain_connections_setup(uint3
 {
     (void)cc_channel;
 
-    g_nrf54_debug_stats.hw_task_local_setup_enter++;
-
     if (dppi_ch == NRF_802154_SL_HW_TASK_PPI_INVALID)
     {
-        g_nrf54_debug_stats.hw_task_local_setup_skip_invalid++;
         return;
     }
 
@@ -102,6 +98,5 @@ void nrf_802154_platform_sl_lptimer_hw_task_local_domain_connections_setup(uint3
 
 void nrf_802154_platform_sl_lptimer_hw_task_local_domain_connections_clear(void)
 {
-    g_nrf54_debug_stats.hw_task_local_clear_enter++;
     nrf_ppib_publish_clear(NRF_PPIB11, nrf_ppib_receive_event_get(m_ppib_chan));
 }

@@ -21,7 +21,6 @@ target_include_directories(nrf-802154-platform
 )
 
 set(NRF54_PLATFORM_SOURCES
-    nrf54_debug_stats.c
     platform_gppi_nrf54l.c
     nrf_802154_clock_platform.c
     nrf_802154_clock_callbacks.c
@@ -41,14 +40,6 @@ if(NOT SL_OPENSOURCE)
 endif()
 
 target_sources(nrf-802154-platform PRIVATE ${NRF54_PLATFORM_SOURCES})
-
-target_compile_definitions(nrf-802154-platform
-    PUBLIC
-        NRF54_DEBUG_STATS=1
-    PRIVATE
-        NRF54_LPTIMER_CC2_ONLY_BISECT=0
-        NRF54_LPTIMER_CC2_STUB_BISECT=0
-)
 
 if(SL_OPENSOURCE)
     message(STATUS "nRF54 platform: GRTC lptimer CC2+CC8+DPPI (open-source SL)")
