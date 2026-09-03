@@ -55,7 +55,6 @@
  #include "platform-config.h"
  #include "platform-nrf5.h"
  
- #include "nrf54_debug_stats.h"
  // clang-format off
  #define US_PER_MS                       1000ULL
  
@@ -205,12 +204,6 @@
  
     if (aSkipCheck || AlarmShallStrike(now, aIndex))
     {
-#ifdef NRF54_DEBUG_STATS
-        if (aIndex == kUsTimer)
-        {
-            g_nrf54_debug_stats.ot_us_alarm_compare_match++;
-        }
-#endif
         sTimerData[aIndex].mFireAlarm = true;
         sEventPending                 = true;
         otSysEventSignalPending();
@@ -279,10 +272,10 @@
      return TicksToTime(nrfx_grtc_syscounter_get(), aIndex);
  }
  
- void GRTC_2_IRQHandler(void)
- {  g_nrf54_debug_stats.grtc2_isr_enter++;
-     nrfx_grtc_irq_handler();
- }
+void GRTC_2_IRQHandler(void)
+{
+    nrfx_grtc_irq_handler();
+}
  void GRTC_0_IRQHandler(void)
  {
      nrfx_grtc_irq_handler();
@@ -364,9 +357,6 @@ bool nrf5AlarmIsPending(void)
         {
             sTimerData[kUsTimer].mFireAlarm = false;
 
-#ifdef NRF54_DEBUG_STATS
-            g_nrf54_debug_stats.ot_us_alarm_fired++;
-#endif
             otPlatAlarmMicroFired(aInstance);
         }
  

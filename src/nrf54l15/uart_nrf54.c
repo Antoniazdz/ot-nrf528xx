@@ -236,23 +236,6 @@ otError otPlatUartFlush(void)
     return OT_ERROR_NONE;
 }
 
-void nrf5UartDrainTx(void)
-{
-    /* Wait for everything the CLI has queued, reporting each transfer so that the
-     * CLI hands over its next chunk. For callers that, unlike cli_uart.cpp, do not
-     * run otPlatUartSendDone() on their own. */
-    while (sTransmitBuffer != NULL)
-    {
-        if (!waitTransmitDone())
-        {
-            sTransmitBuffer = NULL;
-            break;
-        }
-
-        processTransmit();
-    }
-}
-
 void nrf5UartProcess(void)
 {
     processReceive();

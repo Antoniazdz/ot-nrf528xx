@@ -40,7 +40,6 @@ set(NRF_COMM_SOURCES
     ${NRF_PLATFORM_DIR}/flash_nosd.c
     ${NRF_PLATFORM_DIR}/logging.c
     ${NRF_PLATFORM_DIR}/misc_nrf54.c
-    ${NRF_PLATFORM_DIR}/nrf54_debug_stats_dump.c
     ${NRF_PLATFORM_DIR}/ot_tasklet_wrap.c
     ${NRF_PLATFORM_DIR}/radio_nrf54.c
     ${NRF_PLATFORM_DIR}/system_nrf54.c
@@ -92,10 +91,6 @@ set(OT_PLATFORM_DEFINES ${OT_PLATFORM_DEFINES} PARENT_SCOPE)
 target_compile_definitions(ot-config INTERFACE
     "MBEDTLS_USER_CONFIG_FILE=\"nrf54l15-mbedtls-config.h\""
     PLATFORM_OPENTHREAD_VANILLA=1 # CSL-F4.1: ot_tasklet_wrap.c (--wrap=otTaskletsProcess)
-    NRF54_DEBUG_STATS=1
-)
-target_include_directories(ot-config INTERFACE
-    "${PROJECT_SOURCE_DIR}/third_party/nrf54/platform"
 )
 set(OT_PUBLIC_INCLUDES ${OT_PUBLIC_INCLUDES} PARENT_SCOPE)
 

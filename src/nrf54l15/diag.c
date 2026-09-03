@@ -36,7 +36,6 @@
 #include <string.h>
 
 #include "platform-nrf5.h"
-#include "transport/transport-drivers.h"
 
 #include <hal/nrf_gpio.h>
 
@@ -44,15 +43,11 @@
 #include <openthread/platform/alarm-milli.h>
 #include <openthread/platform/diag.h>
 #include <openthread/platform/radio.h>
-#include <openthread/platform/time.h>
 #include <openthread/platform/toolchain.h>
 
 #include <common/logging.hpp>
 #include <nrf_802154.h>
-#include <nrf_802154_sl_timer.h>
 #include <utils/code_utils.h>
-
-#include "nrf54_debug_stats_dump.h"
 
 typedef enum
 {
@@ -265,85 +260,6 @@ exit:
     return error;
 }
 
-/**
- * One stats line per UART transaction: the dumps are longer than the CLI output ring,
- * and draining after every line keeps that ring from wrapping mid-dump.
- */
-static void diagEmitStatsLineUart(void *aContext, const char *aLine)
-{
-    OT_UNUSED_VARIABLE(aContext);
-
-    diagOutput("%s\r\n", aLine);
-    nrf5UartDrainTx();
-}
-
-static otError processNrf54Stats(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[])
-{
-    otError error = OT_ERROR_NONE;
-
-    OT_UNUSED_VARIABLE(aInstance);
-
-    otEXPECT_ACTION(otPlatDiagModeGet(), error = OT_ERROR_INVALID_STATE);
-
-    if (aArgsLength >= 1 && strcmp(aArgs[0], "clear") == 0)
-    {
-        nrf54DebugStatsClear();
-        diagOutput("nrf54 stats cleared\r\n");
-        nrf5UartDrainTx();
-        goto exit;
-    }
-
-    if (aArgsLength >= 1 && strcmp(aArgs[0], "raw") == 0)
-    {
-        nrf54DebugStatsDumpRawEmit(diagEmitStatsLineUart, NULL);
-    }
-    else if (aArgsLength >= 1 && strcmp(aArgs[0], "full") == 0)
-    {
-        nrf54DebugStatsDumpSummaryEmit(diagEmitStatsLineUart, NULL);
-    }
-    else
-    {
-        nrf54DebugStatsDumpHandoffEmit(diagEmitStatsLineUart, NULL);
-        diagEmitStatsLineUart(NULL, "nrf54_handoff_end=1");
-    }
-
-exit:
-    return error;
-}
-
-/**
- * Reads the two time bases that CSL depends on back to back: the one OpenThread
- * schedules the sample windows in, and the one the 802.15.4 driver stamps the CSL
- * phase with. They have to agree, otherwise the phase advertised to the parent is
- * off by their difference.
- */
-static otError processNrf54Clock(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[])
-{
-    otError error = OT_ERROR_NONE;
-
-    OT_UNUSED_VARIABLE(aInstance);
-    OT_UNUSED_VARIABLE(aArgsLength);
-    OT_UNUSED_VARIABLE(aArgs);
-
-    otEXPECT_ACTION(otPlatDiagModeGet(), error = OT_ERROR_INVALID_STATE);
-
-    for (uint8_t i = 0; i < 3; i++)
-    {
-        uint64_t ot0 = otPlatTimeGet();
-        uint64_t sl  = nrf_802154_sl_timer_current_time_get();
-        uint64_t ot1 = otPlatTimeGet();
-
-        /* Truncated to 32 bits: the platform printf has no long long support and the
-         * difference of interest is milliseconds, far below the wrap. */
-        diagOutput("nrf54_clock ot=%lu sl=%lu ot_after=%lu delta=%ld\r\n", (unsigned long)ot0, (unsigned long)sl,
-                   (unsigned long)ot1, (long)((int64_t)sl - (int64_t)ot0));
-        nrf5UartDrainTx();
-    }
-
-exit:
-    return error;
-}
-
 static otError processTemp(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[])
 {
     OT_UNUSED_VARIABLE(aInstance);
@@ -404,8 +320,6 @@ exit:
 const struct PlatformDiagCommand sCommands[] = {{"ccathreshold", &processCcaThreshold},
                                                 {"id", &processID},
                                                 {"listen", &processListen},
-                                                {"nrf54clock", &processNrf54Clock},
-                                                {"nrf54stats", &processNrf54Stats},
                                                 {"temp", &processTemp},
                                                 {"transmit", &processTransmit}};
 

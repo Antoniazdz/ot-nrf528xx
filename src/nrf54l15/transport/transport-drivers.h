@@ -60,14 +60,6 @@ void nrf5UartClearPendingData(void);
 void nrf5UartProcess(void);
 
 /**
- * This function blocks until all data queued for transmission has been sent,
- * reporting completion of every transfer so that OpenThread hands over the data
- * still buffered in its output ring.
- *
- */
-void nrf5UartDrainTx(void);
-
-/**
  * Initialization of SPI Slave driver.
  *
  */
