@@ -26,7 +26,7 @@
 #  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 #  POSSIBILITY OF SUCH DAMAGE.
 #
-# Flash NCS Thread CLI on nRF52840 DK, flash ot-cli-ftd (CSL) on nRF54L15 DK,
+# Flash NCS Thread CLI on nRF52840 DK, flash ot-cli-ftd on nRF54L15 DK,
 # bring up a network (52840 leader), join 54L15 as CSL child, sleep 5s, exit.
 # Serial output from both boards is streamed with [leader] / [child] prefixes.
 #
@@ -34,6 +34,7 @@
 #   ./script/run-nrf52-leader-nrf54-csl-child-test.sh
 #
 # Environment:
+#   OT_CMAKE_BUILD_DIR     nRF54L15 build tree (default: build-nrf54l15-uart)
 #   CSL_PERIOD_US          CSL period in microseconds (default: 500000 = 500 ms).
 #                          Must be a multiple of 160; minimum on this stack is ~16000 µs.
 #                          (500 µs is below the minimum — use 500000 for 500 ms.)
@@ -51,6 +52,8 @@ readonly OT_SRCDIR
 
 POST_START_SLEEP="${POST_START_SLEEP:-5}"
 CSL_PERIOD_US="${CSL_PERIOD_US:-500000}"
+OT_CMAKE_BUILD_DIR="${OT_CMAKE_BUILD_DIR:-build-nrf54l15-uart}"
+export OT_CMAKE_BUILD_DIR
 
 die()
 {
@@ -98,7 +101,7 @@ flash_nrf52840_ncs()
 flash_nrf54l15_cli()
 {
     local serial="${NRF54L15_SERIAL:-$(nrfutil_serial_for_board PCA10156)}"
-    echo "=== Flash nRF54L15 DK (serial ${serial}) ==="
+    echo "=== Flash nRF54L15 DK (serial ${serial}, ${OT_CMAKE_BUILD_DIR}) ==="
     "${OT_SRCDIR}/script/flash-nrf54l15-cli-ftd-csl-debug" "${serial}"
 }
 
