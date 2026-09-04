@@ -164,6 +164,21 @@
 #endif
 
 /**
+ * @def OPENTHREAD_CONFIG_NUM_MESSAGE_BUFFERS
+ *
+ * Number of 128-byte buffers in the message pool.
+ *
+ * The upstream default of 44 covers roughly 5.5 kB, i.e. only three or four
+ * in-flight 1280-byte datagrams once 6LoWPAN fragmentation and reassembly each
+ * hold a chain of ~11 buffers. Saturating UDP traffic then fails allocation and
+ * drops datagrams instead of queueing them, which caps measured goodput. 128
+ * buffers cost 16 kB of RAM, well within the 128 kB region on nRF54L15.
+ */
+#ifndef OPENTHREAD_CONFIG_NUM_MESSAGE_BUFFERS
+#define OPENTHREAD_CONFIG_NUM_MESSAGE_BUFFERS 128
+#endif
+
+/**
  * @def OPENTHREAD_CONFIG_CLI_UART_TX_BUFFER_SIZE
  *
  * The size of CLI message buffer in bytes.
