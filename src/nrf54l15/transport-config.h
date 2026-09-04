@@ -81,8 +81,14 @@
 #define UART_IRQ_PRIORITY 6
 #endif
 
+/**
+ * RX ring size in bytes. Reception is paused (RTS deasserted) once the ring is
+ * full, so this sets how much Spinel traffic may arrive while the main loop is
+ * busy elsewhere: 2048 bytes is ~20 ms of line time at 1 Mbps, comfortably more
+ * than one pass through the radio driver.
+ */
 #ifndef UART_RX_BUFFER_SIZE
-#define UART_RX_BUFFER_SIZE 512
+#define UART_RX_BUFFER_SIZE 2048
 #endif
 
 /* nRF54L15 DK uart20 (PERI / port P1) — NCS zephyr,ot-uart = &uart20 */

@@ -35,7 +35,6 @@
 #include <openthread-core-config.h>
 #include <openthread/config.h>
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -73,33 +72,20 @@ static volatile bool  sTransmitDone   = 0;
 
 /**
  * UART RX ring buffer variables.
+ *
+ * EasyDMA stores every incoming byte directly in the ring, so reception is
+ * driven by ENDRX instead of RXDRDY: RXDRDY is raised before the byte has
+ * reached RAM, which is why reading it used to require forcing the RX FIFO out
+ * with FLUSHRX and spinning on ENDRX from inside the handler.
+ *
+ * sReceivePaused records that the handler left the receiver stopped because the
+ * ring was full. Hardware flow control then deasserts RTS, so the peer stalls
+ * rather than having bytes dropped on the floor.
  */
 static uint8_t           sReceiveBuffer[UART_RX_BUFFER_SIZE];
-static volatile uint16_t sReceiveHead = 0;
-static volatile uint16_t sReceiveTail = 0;
-
-/** Single-byte EasyDMA buffer (nRF54 UARTE has no legacy RXD register). */
-static uint8_t sUarteRxDmaByte;
-
-static void uarteRxArm(void)
-{
-    nrf_uarte_rx_buffer_set(UART_INSTANCE, &sUarteRxDmaByte, 1);
-    nrf_uarte_task_trigger(UART_INSTANCE, NRF_UARTE_TASK_STARTRX);
-}
-
-static uint8_t uarteRxByteGet(void)
-{
-    nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ENDRX);
-    nrf_uarte_task_trigger(UART_INSTANCE, NRF_UARTE_TASK_FLUSHRX);
-
-    while (!nrf_uarte_event_check(UART_INSTANCE, NRF_UARTE_EVENT_ENDRX))
-    {
-    }
-
-    nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ENDRX);
-
-    return sUarteRxDmaByte;
-}
+static volatile uint16_t sReceiveHead   = 0;
+static volatile uint16_t sReceiveTail   = 0;
+static volatile bool     sReceivePaused = false;
 
 /**
  * Function for returning the next RX buffer index.
@@ -123,15 +109,15 @@ static __INLINE bool isRxBufferFull()
 }
 
 /**
- * Function for checking if RX buffer is empty.
+ * Function for handing the slot that the next byte belongs in over to EasyDMA.
  *
- * @retval true  RX buffer is empty.
- * @retval false RX buffer is not empty.
+ * The RX DMA pointer has a single writer, so this must run either from the UART
+ * handler or with the UART interrupt masked.
  */
-static __INLINE bool isRxBufferEmpty()
+static void uarteRxArm(void)
 {
-    uint16_t head = sReceiveHead;
-    return (head == sReceiveTail);
+    nrf_uarte_rx_buffer_set(UART_INSTANCE, &sReceiveBuffer[sReceiveHead], 1);
+    nrf_uarte_task_trigger(UART_INSTANCE, NRF_UARTE_TASK_STARTRX);
 }
 
 /**
@@ -142,8 +128,6 @@ static void processReceive(void)
     // Set head position to not be changed during read procedure.
     uint16_t head = sReceiveHead;
     uint8_t *position;
-
-    otEXPECT(isRxBufferEmpty() == false);
 
     // In case head roll back to the beginning of the buffer, notify about left
     // bytes from the end of the buffer.
@@ -162,14 +146,20 @@ static void processReceive(void)
         sReceiveTail = head;
     }
 
-    // In case interrupts were disabled due to the full buffer, re-enable it now.
-    if (!nrf_uarte_int_enable_check(UART_INSTANCE, NRF_UARTE_INT_RXDRDY_MASK))
+    // Reception was stopped because the ring was full: restart it now that the
+    // bytes above have been handed over and there is room again.
+    if (sReceivePaused)
     {
-        nrf_uarte_int_enable(UART_INSTANCE, NRF_UARTE_INT_RXDRDY_MASK | NRF_UARTE_INT_ERROR_MASK);
-    }
+        NVIC_DisableIRQ(UART_IRQN);
 
-exit:
-    return;
+        if (!isRxBufferFull())
+        {
+            sReceivePaused = false;
+            uarteRxArm();
+        }
+
+        NVIC_EnableIRQ(UART_IRQN);
+    }
 }
 
 /**
@@ -309,13 +299,13 @@ otError otPlatUartEnable(void)
     // Clear UART specific events.
     nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ENDTX);
     nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ERROR);
-    nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_RXDRDY);
+    nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ENDRX);
 
     // Enable interrupts for TX.
     nrf_uarte_int_enable(UART_INSTANCE, NRF_UARTE_INT_ENDTX_MASK);
 
     // Enable interrupts for RX.
-    nrf_uarte_int_enable(UART_INSTANCE, NRF_UARTE_INT_RXDRDY_MASK | NRF_UARTE_INT_ERROR_MASK);
+    nrf_uarte_int_enable(UART_INSTANCE, NRF_UARTE_INT_ENDRX_MASK | NRF_UARTE_INT_ERROR_MASK);
 
     // Configure NVIC to handle UART interrupts.
     NVIC_SetPriority(UART_IRQN, UART_IRQ_PRIORITY);
@@ -331,6 +321,11 @@ otError otPlatUartEnable(void)
 
     // Enable UART instance and arm 1-byte RX (EasyDMA on nRF54 UARTE).
     nrf_uarte_enable(UART_INSTANCE);
+
+    sReceiveHead   = 0;
+    sReceiveTail   = 0;
+    sReceivePaused = false;
+
     uarteRxArm();
 
     sUartEnabled = true;
@@ -354,10 +349,13 @@ otError otPlatUartDisable(void)
     nrf_uarte_int_disable(UART_INSTANCE, NRF_UARTE_INT_ENDTX_MASK);
 
     // Disable interrupts for RX.
-    nrf_uarte_int_disable(UART_INSTANCE, NRF_UARTE_INT_RXDRDY_MASK | NRF_UARTE_INT_ERROR_MASK);
+    nrf_uarte_int_disable(UART_INSTANCE, NRF_UARTE_INT_ENDRX_MASK | NRF_UARTE_INT_ERROR_MASK);
 
     // Disable UART instance.
     nrf_uarte_disable(UART_INSTANCE);
+
+    // Keep processReceive() from re-arming RX on a disabled instance.
+    sReceivePaused = false;
 
     sUartEnabled = false;
 
@@ -400,27 +398,26 @@ void UART_IRQ_HANDLER(void)
     {
         nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ERROR);
     }
-    else if (nrf_uarte_int_enable_check(UART_INSTANCE, NRF_UARTE_INT_RXDRDY_MASK) &&
-             nrf_uarte_event_check(UART_INSTANCE, NRF_UARTE_EVENT_RXDRDY))
+
+    if (nrf_uarte_int_enable_check(UART_INSTANCE, NRF_UARTE_INT_ENDRX_MASK) &&
+        nrf_uarte_event_check(UART_INSTANCE, NRF_UARTE_EVENT_ENDRX))
     {
-        // Clear RXDRDY event.
-        nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_RXDRDY);
+        // Clear ENDRX event.
+        nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ENDRX);
 
-        // Flush HW FIFO into DMA buffer and read the byte.
-        uint8_t byte = uarteRxByteGet();
+        // EasyDMA has already stored the byte at sReceiveHead.
+        sReceiveHead = getNextRxBufferIndex();
 
-        assert(!isRxBufferFull());
-
-        sReceiveBuffer[sReceiveHead] = byte;
-        sReceiveHead                 = getNextRxBufferIndex();
-
-        uarteRxArm();
-
-        // Check if we are able to process next RX bytes.
         if (isRxBufferFull())
         {
-            // Disable interrupts for RX.
-            nrf_uarte_int_disable(UART_INSTANCE, NRF_UARTE_INT_RXDRDY_MASK | NRF_UARTE_INT_ERROR_MASK);
+            // Leave the receiver stopped rather than overwriting bytes that
+            // processReceive() has not handed over yet. RTS is deasserted while
+            // RX is down, so the peer stalls instead of losing data.
+            sReceivePaused = true;
+        }
+        else
+        {
+            uarteRxArm();
         }
 
         otSysEventSignalPending();
