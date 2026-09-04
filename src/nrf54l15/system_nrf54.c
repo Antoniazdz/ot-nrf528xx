@@ -126,6 +126,13 @@ void otSysProcessDrivers(otInstance *aInstance)
     /* CSL-F4.1-BEGIN: alarm before radio (was last in driver pass) */
     nrf5AlarmProcess(aInstance);
     /* CSL-F4.1-END */
+
+    /*
+     * Drain Spinel before delivering deferred radio callbacks so UART HWFC
+     * releases the host promptly. Run it again afterwards to complete UART
+     * events that may have arrived while OpenThread handled the radio work.
+     */
+    nrf5TransportProcess();
     nrf5RadioProcess(aInstance);
     nrf5TransportProcess();
     nrf5TempProcess();
