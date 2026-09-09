@@ -51,6 +51,21 @@
 #define NRF_802154_PENDING_EXTENDED_ADDRESSES OPENTHREAD_CONFIG_MLE_MAX_CHILDREN
 #endif
 
+/**
+ * @def NRF_802154_RX_BUFFERS
+ *
+ * A received frame holds its driver buffer until the main loop hands it to the upper layer and
+ * frees it, so the queue has to cover a whole pass through nrf5RadioProcess() plus the Spinel
+ * transfer that follows it. Once the queue runs dry the driver drops frames and the peer has to
+ * retransmit, which costs far more throughput than the buffers cost in RAM.
+ *
+ * 20 matches CONFIG_NRF_802154_RX_BUFFERS in the NCS OpenThread coprocessor build for
+ * nrf54l15dk; the driver default is 16.
+ */
+#ifndef NRF_802154_RX_BUFFERS
+#define NRF_802154_RX_BUFFERS 20
+#endif
+
 #ifndef NRF_802154_CSMA_CA_ENABLED
 #define NRF_802154_CSMA_CA_ENABLED 1
 #endif
