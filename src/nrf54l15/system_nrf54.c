@@ -51,6 +51,9 @@
 #include <openthread/tasklet.h>
 /* CSL-F4.1-END */
 
+/* Weak no-op: overridden by src/ot_perf/ot_perf.c when linked into ot-cli-ftd. */
+OT_TOOL_WEAK void otPerfProcess(otInstance *aInstance) { OT_UNUSED_VARIABLE(aInstance); }
+
 #if !OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS_MANAGEMENT && PLATFORM_OPENTHREAD_VANILLA
 
 #include <mbedtls/platform.h>
@@ -136,6 +139,8 @@ void otSysProcessDrivers(otInstance *aInstance)
     nrf5RadioProcess(aInstance);
     nrf5TransportProcess();
     nrf5TempProcess();
+
+    otPerfProcess(aInstance);
 }
 
 /* CSL-F4.1-BEGIN: __SEV() wake (was __WEAK empty stub) */
