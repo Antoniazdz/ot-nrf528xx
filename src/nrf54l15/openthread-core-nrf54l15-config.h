@@ -81,13 +81,11 @@
 #define OPENTHREAD_CONFIG_PLATFORM_USEC_TIMER_ENABLE 1
 #endif
 
-#ifndef RADIO_CONFIG_SRC_MATCH_SHORT_ENTRY_NUM
-#define RADIO_CONFIG_SRC_MATCH_SHORT_ENTRY_NUM 0
-#endif
-
-#ifndef RADIO_CONFIG_SRC_MATCH_EXT_ENTRY_NUM
-#define RADIO_CONFIG_SRC_MATCH_EXT_ENTRY_NUM 0
-#endif
+/* Source matching capacity is not configured here: RADIO_CONFIG_SRC_MATCH_*_ENTRY_NUM used to live
+ * in this file but nothing reads it (neither OpenThread nor this port), so the value was inert and
+ * only read as if source matching were disabled. The real limits are
+ * NRF_802154_PENDING_SHORT_ADDRESSES / NRF_802154_PENDING_EXTENDED_ADDRESSES in platform-config.h,
+ * both OPENTHREAD_CONFIG_MLE_MAX_CHILDREN (32), matching NCS. */
 
 /* AHEAD/AFTER match the nRF defconfig in NCS (nrf/subsys/net/openthread/Kconfig.defconfig): the
  * 802.15.4 driver extends the DRX window itself once it detects a start of frame inside it. */
