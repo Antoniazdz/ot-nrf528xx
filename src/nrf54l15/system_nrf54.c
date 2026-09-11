@@ -42,9 +42,12 @@
 #include <openthread/platform/logging.h>
 
 #include "openthread-system.h"
+#include "perf_timing_port.h"
 #include "platform-fem.h"
 #include "platform-nrf5-transport.h"
 #include "platform-nrf5.h"
+
+#include <openthread/platform/time.h>
 
 #include <nrfx.h>
 /* CSL-F4.1-BEGIN: tasklets + early alarm in main loop */
@@ -64,6 +67,24 @@ OT_TOOL_WEAK void otPerfProcess(otInstance *aInstance) { OT_UNUSED_VARIABLE(aIns
 #endif
 
 extern bool gPlatformPseudoResetWasRequested;
+
+/*
+ * The radio ISR only latches a bit; otPlatRadioTxDone/ReceiveDone are handed to OpenThread by
+ * nrf5RadioProcess(), and the MAC only acts on them in the following otTaskletsProcess(). Pair the
+ * two here, and keep going while the ISR posts more completions, so a burst of them costs one
+ * turnaround instead of one loop iteration each.
+ */
+static void nrf54ServiceRadio(otInstance *aInstance)
+{
+    /* Bounded so heavy RX cannot starve the rest of the driver pass indefinitely. */
+    unsigned drainsLeft = 8;
+
+    do
+    {
+        nrf5RadioProcess(aInstance);
+        otTaskletsProcess(aInstance);
+    } while (nrf5RadioHasPendingCallbacks() && drainsLeft-- != 0);
+}
 
 void __cxa_pure_virtual(void)
 {
@@ -124,8 +145,29 @@ bool otSysPseudoResetWasRequested(void)
     return gPlatformPseudoResetWasRequested;
 }
 
+static uint32_t perfTimingElapsedUs(uint64_t *aTimestampUs)
+{
+    uint64_t now = otPlatTimeGet();
+    uint32_t elapsed;
+
+    elapsed = (uint32_t)((now >= *aTimestampUs) ? (now - *aTimestampUs) : 0U);
+    *aTimestampUs = now;
+
+    return elapsed;
+}
+
 void otSysProcessDrivers(otInstance *aInstance)
 {
+    const bool     timing = otPerfTimingIsActive();
+    uint64_t       timestampUs;
+    uint32_t       sectionUs;
+
+    if (timing)
+    {
+        otPerfTimingDriverPassBegin();
+        timestampUs = otPlatTimeGet();
+    }
+
     /* CSL-F4.1-BEGIN: alarm before radio (was last in driver pass) */
     nrf5AlarmProcess(aInstance);
     /* CSL-F4.1-END */
@@ -136,11 +178,56 @@ void otSysProcessDrivers(otInstance *aInstance)
      * events that may have arrived while OpenThread handled the radio work.
      */
     nrf5TransportProcess();
-    nrf5RadioProcess(aInstance);
-    nrf5TransportProcess();
-    nrf5TempProcess();
+
+    if (timing)
+    {
+        sectionUs = perfTimingElapsedUs(&timestampUs);
+        otPerfTimingAddTransportUs(sectionUs);
+    }
+
+    /*
+     * A transmission that finished while the loop was elsewhere must not queue up behind the pump:
+     * otPerfProcess() builds and submits a whole datagram, so serialising it in front of a waiting
+     * completion adds its full cost to the inter-frame gap. Release the completion first, then pump
+     * while the frame it started is on air.
+     */
+    if (nrf5RadioHasPendingCallbacks())
+    {
+        nrf54ServiceRadio(aInstance);
+
+        if (timing)
+        {
+            sectionUs = perfTimingElapsedUs(&timestampUs);
+            otPerfTimingAddRadioPreUs(sectionUs);
+        }
+    }
 
     otPerfProcess(aInstance);
+
+    if (timing)
+    {
+        sectionUs = perfTimingElapsedUs(&timestampUs);
+        otPerfTimingAddPerfProcessUs(sectionUs);
+    }
+
+    nrf54ServiceRadio(aInstance);
+
+    if (timing)
+    {
+        sectionUs = perfTimingElapsedUs(&timestampUs);
+        otPerfTimingAddRadioPostUs(sectionUs);
+    }
+
+    nrf5TransportProcess();
+
+    if (timing)
+    {
+        sectionUs = perfTimingElapsedUs(&timestampUs);
+        otPerfTimingAddTransportUs(sectionUs);
+        otPerfTimingDriverPassEnd();
+    }
+
+    nrf5TempProcess();
 }
 
 /* CSL-F4.1-BEGIN: __SEV() wake (was __WEAK empty stub) */

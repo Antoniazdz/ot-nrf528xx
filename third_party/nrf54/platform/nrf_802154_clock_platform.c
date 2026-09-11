@@ -166,27 +166,26 @@ void nrf_802154_clock_deinit(void)
 
 void nrf_802154_clock_hfclk_start(void)
 {
-    if (mHfclkUsers == UINT8_MAX) { return; }
-    if (mHfclkUsers++ == 0)
+    if (mHfclkUsers < UINT8_MAX)
     {
-        if (hfclk_running_check())
-        {
-            nrf_802154_clock_hfclk_ready();
-        }
-        else
-        {
-            hfclk_drv_start();
-        }
+        mHfclkUsers++;
     }
-    else if (hfclk_running_check())
+
+    /* Every request must resolve into a notification, either synchronously here
+     * or from hfclk_evt_handler() once the clock reports started. Returning
+     * without doing either strands the caller waiting for RSCH_PREC_HFCLK. */
+    if (hfclk_running_check())
     {
         nrf_802154_clock_hfclk_ready();
+    }
+    else
+    {
+        hfclk_drv_start();
     }
 }
 
 void nrf_802154_clock_hfclk_stop(void)
 {
-    
     if ((mHfclkUsers > 0) && (--mHfclkUsers == 0))
     {
         if (hfclk_running_check())
@@ -202,21 +201,19 @@ bool nrf_802154_clock_hfclk_is_running(void)
 }
 
 void nrf_802154_clock_lfclk_start(void)
-{   if (mLfclkUsers == UINT8_MAX) { return; }
-    if (mLfclkUsers++ == 0)
+{
+    if (mLfclkUsers < UINT8_MAX)
     {
-        if (nrfx_clock_lfclk_running_check(NULL))
-        {
-            nrf_802154_clock_lfclk_ready();
-        }
-        else
-        {
-            nrfx_clock_lfclk_start();
-        }
+        mLfclkUsers++;
     }
-    else if (nrfx_clock_lfclk_running_check(NULL))
+
+    if (nrfx_clock_lfclk_running_check(NULL))
     {
         nrf_802154_clock_lfclk_ready();
+    }
+    else
+    {
+        nrfx_clock_lfclk_start();
     }
 }
 

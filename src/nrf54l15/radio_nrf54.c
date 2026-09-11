@@ -64,6 +64,7 @@
 #include <nrf_802154.h>
 #include <nrf_802154_common_utils.h>
 #include <nrf_802154_const.h>
+#include <nrf_802154_nrfx_addons.h>
 #include <nrf_802154_pib.h>
 #include "platform/nrf_802154_clock.h"
 
@@ -86,8 +87,13 @@ _Pragma("diag_suppress=Pe167")
 
 enum
 {
-    NRF54L15_RECEIVE_SENSITIVITY  = -102, // dBm (POC placeholder; tune for nRF54L15)
-    NRF54L15_MIN_CCA_ED_THRESHOLD = -92,  // dBm (POC placeholder; tune for nRF54L15)
+    NRF54L15_RECEIVE_SENSITIVITY = -102, // dBm (POC placeholder; tune for nRF54L15)
+
+    // The radio driver keeps the CCA ED threshold as an absolute dBm value and converts it to
+    // hardware units with dbm_to_hw(dbm) = dbm - ED_RSSIOFFS. ED_RSSIOFFS is therefore the lowest
+    // threshold the hardware can express, and int8_t caps the upper end.
+    NRF54L15_MIN_CCA_ED_THRESHOLD = ED_RSSIOFFS,
+    NRF54L15_MAX_CCA_ED_THRESHOLD = INT8_MAX,
 };
 
 // clang-format on
@@ -137,6 +143,17 @@ typedef enum
     kPendingEventEnergyDetectionStart, // Requested to start Energy Detection procedure.
     kPendingEventEnergyDetected,       // Energy Detection finished.
 } RadioPendingEvents;
+
+/*
+ * Events that carry a finished operation up to OpenThread. kPendingEventSleep and
+ * kPendingEventEnergyDetectionStart are excluded on purpose: those are requests *into* the driver
+ * that stay latched until it accepts them, so treating them as outstanding work would make
+ * nrf5RadioHasPendingCallbacks() report true for as long as the radio refuses to sleep.
+ */
+#define PENDING_EVENT_CALLBACK_MASK                                                                       \
+    ((1UL << kPendingEventFrameTransmitted) | (1UL << kPendingEventChannelAccessFailure) |                \
+     (1UL << kPendingEventInvalidOrNoAck) | (1UL << kPendingEventReceiveFailed) |                         \
+     (1UL << kPendingEventEnergyDetected))
 
 static uint32_t sPendingEvents;
 static bool     sRxOnWhenIdle = true;
@@ -430,6 +447,12 @@ void nrf5RadioInit(void)
     otLinkMetricsInit(NRF54L15_RECEIVE_SENSITIVITY);
 #endif
     nrf_802154_init();
+
+    // Program CCA explicitly rather than inheriting the driver's implicit defaults, so that the
+    // threshold this port runs with is stated here and the LNA gain compensation is applied from
+    // the first transmission. The setter ignores aInstance.
+    (void)otPlatRadioSetCcaEnergyDetectThreshold(NULL, NRF_802154_CCA_ED_THRESHOLD_DBM_DEFAULT);
+
     nrf_802154_clock_hfclk_start();
 }
 
@@ -439,6 +462,24 @@ void nrf5RadioDeinit(void)
     nrf_802154_deinit();
     sPendingEvents = 0;
     SetRadioDriverState(NRF_802154_STATE_SLEEP);
+}
+
+bool nrf5RadioHasPendingCallbacks(void)
+{
+    if ((sPendingEvents & PENDING_EVENT_CALLBACK_MASK) != 0)
+    {
+        return true;
+    }
+
+    for (uint32_t i = 0; i < NRF_802154_RX_BUFFERS; i++)
+    {
+        if (sReceivedFrames[i].mPsdu != NULL)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void nrf5RadioClearPendingEvents(void)
@@ -954,8 +995,10 @@ otError otPlatRadioGetCcaEnergyDetectThreshold(otInstance *aInstance, int8_t *aT
     else
     {
         nrf_802154_cca_cfg_get(&ccaConfig);
-        // The radio driver has no function to convert ED threshold to dBm
-        *aThreshold = (int8_t)ccaConfig.ed_threshold + NRF54L15_MIN_CCA_ED_THRESHOLD - sLnaGain;
+
+        // ed_threshold is already an absolute dBm value; the driver applies the conversion to
+        // hardware units itself when it programs the radio.
+        *aThreshold = ccaConfig.ed_threshold - sLnaGain;
     }
 
     return error;
@@ -968,18 +1011,21 @@ otError otPlatRadioSetCcaEnergyDetectThreshold(otInstance *aInstance, int8_t aTh
     otError              error = OT_ERROR_NONE;
     nrf_802154_cca_cfg_t ccaConfig;
 
-    aThreshold += sLnaGain;
+    // Widened so that compensating for the LNA gain cannot overflow int8_t before it is range
+    // checked. The FEM here is a stub, so mpsl_fem_lna_is_configured() reports no gain to the
+    // driver and this is the only place the gain is accounted for.
+    int16_t threshold = (int16_t)aThreshold + sLnaGain;
 
-    // The minimum value of ED threshold for radio driver is -94 dBm
-    if (aThreshold < NRF54L15_MIN_CCA_ED_THRESHOLD)
+    if ((threshold < NRF54L15_MIN_CCA_ED_THRESHOLD) || (threshold > NRF54L15_MAX_CCA_ED_THRESHOLD))
     {
         error = OT_ERROR_INVALID_ARGS;
     }
     else
     {
-        memset(&ccaConfig, 0, sizeof(ccaConfig));
+        nrf_802154_cca_cfg_get(&ccaConfig);
+
         ccaConfig.mode         = NRF_RADIO_CCA_MODE_ED;
-        ccaConfig.ed_threshold = nrf_802154_ccaedthres_from_dbm_calculate(aThreshold);
+        ccaConfig.ed_threshold = (int8_t)threshold;
 
         nrf_802154_cca_cfg_set(&ccaConfig);
     }

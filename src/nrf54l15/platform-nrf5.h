@@ -131,6 +131,14 @@ void nrf5RadioProcess(otInstance *aInstance);
  */
 void nrf5RadioClearPendingEvents(void);
 
+/**
+ * Returns whether a finished radio operation or a received frame is still waiting to be handed to
+ * OpenThread by nrf5RadioProcess(). Pending *requests* into the driver (sleep, energy detection
+ * start) are not reported, because those stay latched until the driver accepts them.
+ *
+ */
+bool nrf5RadioHasPendingCallbacks(void);
+
 /* CSL-F4.1-BEGIN: nRF54 main loop (see system_nrf54.c, main.c) */
 void nrf54ProcessMainLoop(otInstance *aInstance);
 /* CSL-F4.1-END */

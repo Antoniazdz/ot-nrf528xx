@@ -43,6 +43,8 @@ set(NRF_COMM_SOURCES
     ${NRF_PLATFORM_DIR}/ot_tasklet_wrap.c
     ${NRF_PLATFORM_DIR}/radio_nrf54.c
     ${NRF_PLATFORM_DIR}/system_nrf54.c
+    ${NRF_PLATFORM_DIR}/perf_timing_stubs.c
+    ${NRF_PLATFORM_DIR}/perf_drain_port_nrf54.c
     ${NRF_PLATFORM_DIR}/temp_nrf54.c
 )
 
@@ -59,6 +61,7 @@ set(NRF54L15_3RD_LIBS
 
 set(NRF_INCLUDES
     ${NRF_PLATFORM_DIR}
+    ${PROJECT_SOURCE_DIR}/src/ot_perf
     ${PROJECT_SOURCE_DIR}/openthread/examples/platforms
 )
 
@@ -225,5 +228,16 @@ target_compile_definitions(ot-config INTERFACE ${OT_PLATFORM_DEFINES})
 foreach(_nrf54_ot_app IN ITEMS ot-cli-ftd ot-cli-mtd ot-rcp ot-ncp-ftd ot-ncp-mtd)
     if(TARGET ${_nrf54_ot_app})
         target_link_options(${_nrf54_ot_app} PRIVATE "LINKER:--wrap=otTaskletsProcess")
+    endif()
+endforeach()
+
+# perf timing wraps: only CLI apps that link the ot-perf vendor extension.
+foreach(_nrf54_ot_app IN ITEMS ot-cli-ftd ot-cli-mtd)
+    if(TARGET ${_nrf54_ot_app})
+        target_link_options(${_nrf54_ot_app} PRIVATE
+            "LINKER:--wrap=otPlatRadioTxDone"
+            "LINKER:--wrap=otPlatRadioTransmit"
+            "LINKER:--wrap=otSysProcessDrivers"
+        )
     endif()
 endforeach()
