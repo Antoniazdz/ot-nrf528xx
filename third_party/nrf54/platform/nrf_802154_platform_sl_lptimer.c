@@ -36,8 +36,6 @@ static uint32_t m_critical_section_cnt;
 /* CC2 callback compare channel                                                 */
 /* -------------------------------------------------------------------------- */
 
-#define MIN_LPTICK_COMPARE_EVENT_TICKS 2ULL
-
 static volatile bool       m_enabled;
 static bool                m_compare_int_was_enabled;
 static uint8_t             m_callbacks_channel;
@@ -100,28 +98,17 @@ static void timer_compare_handler(int32_t aChannel, uint64_t aExpireTime, void *
 
 static void compare_schedule(uint8_t aChannel, nrfx_grtc_channel_t *aChannelData, uint64_t aFireLpticks)
 {
-    uint64_t now_lpticks = nrfx_grtc_syscounter_get();
+    bool key = compare_int_lock(aChannel);
 
     /*
-     * Past compare does not reliably raise CC2 IRQ (nrfx clears the event on set).
-     * Clamp to now + margin and arm CC — do not call sl_timer_handler here: that
-     * re-enters handle_timer/schedule_at and can recurse while m_fired_mutex is held
-     * in the timer callback (GDB "finish" never returns).
+     * Match NCS z_nrf_grtc_timer_set: pass fire time through; HW fires on past compare.
+     * Late IRQ is ignored in timer_compare_handler via is_lptimer_enabled().
+     * Re-arm CCEN after absolute_set (cc_channel_prepare disables it).
      */
-    if (aFireLpticks <= now_lpticks + MIN_LPTICK_COMPARE_EVENT_TICKS)
-    {
-        aFireLpticks = now_lpticks + MIN_LPTICK_COMPARE_EVENT_TICKS;
-    }
-
-    /*
-     * Match NCS lptimer_grtc.c: disable → set → always enable CC int (also in radio crit).
-     * Do not use compare_int_unlock() here — if the channel was not yet enabled,
-     * unlock leaves CC2 IRQ off and sl_timer_handler never runs under thread start.
-     */
-    (void)nrfx_grtc_syscounter_cc_int_disable(aChannel);
     (void)nrfx_grtc_syscounter_cc_absolute_set(aChannelData, aFireLpticks, true);
-    (void)nrfx_grtc_syscounter_cc_int_enable(aChannel);
     nrfy_grtc_sys_counter_compare_event_enable(NRF_GRTC, aChannel);
+
+    compare_int_unlock(aChannel, key);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -40,6 +40,7 @@ set(NRF_COMM_SOURCES
     ${NRF_PLATFORM_DIR}/flash_nosd.c
     ${NRF_PLATFORM_DIR}/logging.c
     ${NRF_PLATFORM_DIR}/misc_nrf54.c
+    ${NRF_PLATFORM_DIR}/nrf54_rcp_tput_stats.c
     ${NRF_PLATFORM_DIR}/ot_tasklet_wrap.c
     ${NRF_PLATFORM_DIR}/radio_nrf54.c
     ${NRF_PLATFORM_DIR}/system_nrf54.c
@@ -166,6 +167,7 @@ target_compile_definitions(openthread-nrf54l15
     PUBLIC
         ${OT_PLATFORM_DEFINES}
         NRF54_CSL_KEEP_RADIO_AWAKE=${NRF54_CSL_KEEP_RADIO_AWAKE}
+        NRF54_RCP_TPUT_STATS=1
 )
 
 target_compile_definitions(openthread-nrf54l15-transport
@@ -204,6 +206,7 @@ target_include_directories(openthread-nrf54l15
     PRIVATE
         ${NRF_INCLUDES}
         ${OT_PUBLIC_INCLUDES}
+        ${PROJECT_SOURCE_DIR}/third_party/jlink/SEGGER_RTT_V640/RTT
 )
 
 target_include_directories(openthread-nrf54l15-transport

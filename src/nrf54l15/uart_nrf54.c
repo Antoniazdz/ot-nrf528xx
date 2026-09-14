@@ -46,6 +46,7 @@
 #include "openthread-system.h"
 
 #include "platform-nrf5-transport.h"
+#include "nrf54_rcp_tput_stats.h"
 #include <hal/nrf_gpio.h>
 #include <hal/nrf_uarte.h>
 #include "nrf_802154_clock.h"
@@ -125,24 +126,31 @@ static void uarteRxArm(void)
  */
 static void processReceive(void)
 {
+    uint16_t deliveredBytes;
     // Set head position to not be changed during read procedure.
     uint16_t head = sReceiveHead;
     uint8_t *position;
+
+    nrf54RcpTputStatsNoteUartProcessReceiveStart();
 
     // In case head roll back to the beginning of the buffer, notify about left
     // bytes from the end of the buffer.
     if (head < sReceiveTail)
     {
-        position = &sReceiveBuffer[sReceiveTail];
-        otPlatUartReceived(position, (UART_RX_BUFFER_SIZE - sReceiveTail));
+        deliveredBytes = (uint16_t)(UART_RX_BUFFER_SIZE - sReceiveTail);
+        position         = &sReceiveBuffer[sReceiveTail];
+        otPlatUartReceived(position, deliveredBytes);
+        nrf54RcpTputStatsNoteUartDelivered(deliveredBytes);
         sReceiveTail = 0;
     }
 
     // Notify about received bytes.
     if (head > sReceiveTail)
     {
-        position = &sReceiveBuffer[sReceiveTail];
-        otPlatUartReceived(position, (head - sReceiveTail));
+        deliveredBytes = (uint16_t)(head - sReceiveTail);
+        position         = &sReceiveBuffer[sReceiveTail];
+        otPlatUartReceived(position, deliveredBytes);
+        nrf54RcpTputStatsNoteUartDelivered(deliveredBytes);
         sReceiveTail = head;
     }
 
@@ -209,6 +217,7 @@ static void processTransmit(void)
         // Clear Transmition transaction and notify application.
         sTransmitBuffer = NULL;
         sTransmitDone   = false;
+        nrf54RcpTputStatsNoteUartTxDone();
         otPlatUartSendDone();
     }
 
@@ -404,6 +413,8 @@ void UART_IRQ_HANDLER(void)
     {
         // Clear ENDRX event.
         nrf_uarte_event_clear(UART_INSTANCE, NRF_UARTE_EVENT_ENDRX);
+
+        nrf54RcpTputStatsNoteUartEndRxIrq();
 
         // EasyDMA has already stored the byte at sReceiveHead.
         sReceiveHead = getNextRxBufferIndex();

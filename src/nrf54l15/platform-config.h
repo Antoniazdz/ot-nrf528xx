@@ -100,7 +100,7 @@
  * Interrupt priority for GRTC (OT ms/us alarms).
  */
 #ifndef OT_GRTC_IRQ_PRIORITY
-#define OT_GRTC_IRQ_PRIORITY 6
+#define OT_GRTC_IRQ_PRIORITY 1
 #endif
 
 /**
@@ -166,6 +166,9 @@
 #define OT_GRTC_ALWAYS_ON 1
 #endif
 
+#ifndef NRF_802154_SWI_PRIORITY
+#define NRF_802154_SWI_PRIORITY 1
+#endif
 /**
  * @def OT_HFCLK_ALWAYS_ON
  *

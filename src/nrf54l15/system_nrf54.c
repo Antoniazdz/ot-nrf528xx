@@ -45,6 +45,7 @@
 #include "platform-fem.h"
 #include "platform-nrf5-transport.h"
 #include "platform-nrf5.h"
+#include "nrf54_rcp_tput_stats.h"
 
 #include <nrfx.h>
 /* CSL-F4.1-BEGIN: tasklets + early alarm in main loop */
@@ -96,6 +97,7 @@ void otSysInit(int argc, char *argv[])
     nrf5TempInit();
     nrf5FemInit();
     nrf5CryptoInit();
+    nrf54RcpTputStatsInit();
 
     gPlatformPseudoResetWasRequested = false;
 }
@@ -126,21 +128,43 @@ bool otSysPseudoResetWasRequested(void)
 
 void otSysProcessDrivers(otInstance *aInstance)
 {
-    /* CSL-F4.1-BEGIN: alarm before radio (was last in driver pass) */
-    nrf5AlarmProcess(aInstance);
-    /* CSL-F4.1-END */
+    uint64_t passStartUs = nrf54RcpTputStatsNowUs();
+    uint64_t phaseStartUs;
+    uint32_t phaseUs;
 
-    /*
-     * Drain Spinel before delivering deferred radio callbacks so UART HWFC
-     * releases the host promptly. Run it again afterwards to complete UART
-     * events that may have arrived while OpenThread handled the radio work.
-     */
-    nrf5TransportProcess();
+    nrf54RcpTputStatsNoteMainLoopDriverPass();
+
+    /* Match NCS coprocessor order: radio, alarm, transport (single pass). */
+    phaseStartUs = nrf54RcpTputStatsNowUs();
     nrf5RadioProcess(aInstance);
+    phaseUs = (uint32_t)(nrf54RcpTputStatsNowUs() - phaseStartUs);
+    nrf54RcpTputStatsRecordSumMax(&g_nrf54_rcp_tput_stats.pass_radio_sum_us,
+                                    &g_nrf54_rcp_tput_stats.pass_radio_max_us,
+                                    phaseUs);
+
+    phaseStartUs = nrf54RcpTputStatsNowUs();
+    nrf5AlarmProcess(aInstance);
+    phaseUs = (uint32_t)(nrf54RcpTputStatsNowUs() - phaseStartUs);
+    nrf54RcpTputStatsRecordSumMax(&g_nrf54_rcp_tput_stats.pass_alarm_sum_us,
+                                    &g_nrf54_rcp_tput_stats.pass_alarm_max_us,
+                                    phaseUs);
+
+    phaseStartUs = nrf54RcpTputStatsNowUs();
+    nrf54RcpTputStatsNoteTransportPass1();
     nrf5TransportProcess();
+    phaseUs = (uint32_t)(nrf54RcpTputStatsNowUs() - phaseStartUs);
+    nrf54RcpTputStatsRecordSumMax(&g_nrf54_rcp_tput_stats.pass_transport1_sum_us,
+                                    &g_nrf54_rcp_tput_stats.pass_transport1_max_us,
+                                    phaseUs);
+
     nrf5TempProcess();
 
     otPerfProcess(aInstance);
+
+    phaseUs = (uint32_t)(nrf54RcpTputStatsNowUs() - passStartUs);
+    nrf54RcpTputStatsRecordSumMax(&g_nrf54_rcp_tput_stats.pass_total_sum_us,
+                                    &g_nrf54_rcp_tput_stats.pass_total_max_us,
+                                    phaseUs);
 }
 
 /* CSL-F4.1-BEGIN: __SEV() wake (was __WEAK empty stub) */

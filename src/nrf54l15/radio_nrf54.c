@@ -56,6 +56,7 @@
 #include "openthread-system.h"
 #include "platform-fem.h"
 #include "platform-nrf5.h"
+#include "nrf54_rcp_tput_stats.h"
 
 #include <hal/nrf_ficr.h>
 #include <nrfx_glue.h>
@@ -643,6 +644,7 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
     {
         // Enable FEM before RADIO leaving SLEEP state.
         nrf5FemEnable();
+        nrf54RcpTputStatsNoteRadioFemFromSleep();
     }
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
@@ -684,6 +686,7 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
             };
 
             (void)nrf_802154_csma_ca_max_backoffs_set(aFrame->mInfo.mTxInfo.mMaxCsmaBackoffs);
+            nrf54RcpTputStatsNoteRadioTxEnter(true);
             txError = nrf_802154_transmit_csma_ca_raw(&aFrame->mPsdu[-1], &csmaMetadata);
         }
         else
@@ -700,6 +703,7 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
                 .tx_timestamp_encode = false,
             };
 
+            nrf54RcpTputStatsNoteRadioTxEnter(false);
             txError = nrf_802154_transmit_raw(&aFrame->mPsdu[-1], &metadata);
         }
     }
@@ -1046,6 +1050,7 @@ void nrf5RadioProcess(otInstance *aInstance)
 
         otRadioFrame *ackPtr = (sAckFrame.mPsdu == NULL) ? NULL : &sAckFrame;
         otPlatRadioTxDone(aInstance, &sTransmitFrame, ackPtr, OT_ERROR_NONE);
+        nrf54RcpTputStatsNoteRadioProcessTxDone();
 
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
         cslScheduleSleepIfChildRxOff(); /* CSL-P0-F3b */
@@ -1062,6 +1067,7 @@ void nrf5RadioProcess(otInstance *aInstance)
     {
         resetPendingEvent(kPendingEventChannelAccessFailure);
         otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_CHANNEL_ACCESS_FAILURE);
+        nrf54RcpTputStatsNoteRadioProcessTxDone();
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
         cslScheduleSleepIfChildRxOff(); /* CSL-P0-F3b */
 #endif
@@ -1071,6 +1077,7 @@ void nrf5RadioProcess(otInstance *aInstance)
     {
         resetPendingEvent(kPendingEventInvalidOrNoAck);
         otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_NO_ACK);
+        nrf54RcpTputStatsNoteRadioProcessTxDone();
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
         cslScheduleSleepIfChildRxOff(); /* CSL-P0-F3b */
 #endif
@@ -1307,6 +1314,8 @@ void nrf_802154_transmitted_raw(uint8_t                                   *p_fra
 
     assert(p_frame == sTransmitPsdu);
 
+    nrf54RcpTputStatsNoteRadioTxComplete(true, false);
+
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
     nrf54UpdateTxFrameInfo(p_metadata);
 #endif
@@ -1349,12 +1358,14 @@ void nrf_802154_transmit_failed(uint8_t                                   *p_fra
     case NRF_802154_TX_ERROR_TIMESLOT_ENDED:
     case NRF_802154_TX_ERROR_ABORTED:
     case NRF_802154_TX_ERROR_TIMESLOT_DENIED:
+        nrf54RcpTputStatsNoteRadioTxComplete(false, true);
         setPendingEvent(kPendingEventChannelAccessFailure);
         break;
 
     case NRF_802154_TX_ERROR_INVALID_ACK:
     case NRF_802154_TX_ERROR_NO_ACK:
     case NRF_802154_TX_ERROR_NO_MEM:
+        nrf54RcpTputStatsNoteRadioTxComplete(false, false);
         setPendingEvent(kPendingEventInvalidOrNoAck);
         break;
 
