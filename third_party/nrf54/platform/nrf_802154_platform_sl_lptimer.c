@@ -26,6 +26,8 @@
 #include "nrf_802154_platform_sl_lptimer_grtc_hw_task.h"
 #include "nrf_802154_sl_atomics.h"
 
+#include "nrf_802154_platform_rcp_tput_stats_hook.h"
+
 #ifndef OT_GRTC_US_PER_TICK
 #define OT_GRTC_US_PER_TICK 1ULL
 #endif
@@ -40,6 +42,7 @@ static volatile bool       m_enabled;
 static bool                m_compare_int_was_enabled;
 static uint8_t             m_callbacks_channel;
 static nrfx_grtc_channel_t m_callbacks_channel_data;
+static volatile uint64_t   m_last_scheduled_fire_lpticks;
 
 static inline bool is_lptimer_enabled(void)
 {
@@ -93,12 +96,22 @@ static void timer_compare_handler(int32_t aChannel, uint64_t aExpireTime, void *
     }
 
     curr_ticks = nrfx_grtc_syscounter_get();
+
+    {
+        uint64_t scheduled = m_last_scheduled_fire_lpticks;
+        uint64_t slip      = (curr_ticks >= scheduled) ? (curr_ticks - scheduled) : 0;
+
+        nrf_802154_platform_rcp_tput_stats_lptimer_fire((uint32_t)slip);
+    }
+
     nrf_802154_sl_timer_handler(curr_ticks);
 }
 
 static void compare_schedule(uint8_t aChannel, nrfx_grtc_channel_t *aChannelData, uint64_t aFireLpticks)
 {
     bool key = compare_int_lock(aChannel);
+
+    m_last_scheduled_fire_lpticks = aFireLpticks;
 
     /*
      * Match NCS z_nrf_grtc_timer_set: pass fire time through; HW fires on past compare.
@@ -255,6 +268,8 @@ uint64_t nrf_802154_platform_sl_lptimer_lpticks_to_us_convert(uint64_t lpticks)
 
 void nrf_802154_platform_sl_lptimer_schedule_at(uint64_t fire_lpticks)
 {
+    /* Disarm stale CC before re-arm (matches NCS z_nrf_grtc_timer_set / abort semantics). */
+    compare_channel_disarm(m_callbacks_channel);
     m_enabled = true;
     compare_schedule(m_callbacks_channel, &m_callbacks_channel_data, fire_lpticks);
 }

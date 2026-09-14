@@ -48,6 +48,7 @@
 #include "nrf54_rcp_tput_stats.h"
 
 #include <nrfx.h>
+#include <hal/nrf_cache.h>
 /* CSL-F4.1-BEGIN: tasklets + early alarm in main loop */
 #include <openthread/tasklet.h>
 /* CSL-F4.1-END */
@@ -80,6 +81,13 @@ void otSysInit(int argc, char *argv[])
     {
         otSysDeinit();
     }
+
+#if OT_NRF54_ICACHE_ENABLE && defined(NRF_ICACHE)
+    /* Counterpart of NVMC->ICACHECNF on nRF52 and of sys_cache_instr_enable() in the
+     * Zephyr nRF54L SoC init. Writes to cached RRAM are write-around and invalidate
+     * the line in hardware, so flash_nosd.c needs no cache maintenance. */
+    nrf_cache_enable(NRF_ICACHE);
+#endif
 
 #if !OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS_MANAGEMENT && PLATFORM_OPENTHREAD_VANILLA
     mbedtls_platform_set_calloc_free(otHeapCAlloc, otHeapFree);
@@ -134,7 +142,8 @@ void otSysProcessDrivers(otInstance *aInstance)
 
     nrf54RcpTputStatsNoteMainLoopDriverPass();
 
-    /* Match NCS coprocessor order: radio, alarm, transport (single pass). */
+    /* nRF52 order: radio, then transport/temp/alarm. Drain notify HDLC tasklets
+     * immediately after radio so uart_prep does not include alarm or host RX decode. */
     phaseStartUs = nrf54RcpTputStatsNowUs();
     nrf5RadioProcess(aInstance);
     phaseUs = (uint32_t)(nrf54RcpTputStatsNowUs() - phaseStartUs);
@@ -142,12 +151,10 @@ void otSysProcessDrivers(otInstance *aInstance)
                                     &g_nrf54_rcp_tput_stats.pass_radio_max_us,
                                     phaseUs);
 
-    phaseStartUs = nrf54RcpTputStatsNowUs();
-    nrf5AlarmProcess(aInstance);
-    phaseUs = (uint32_t)(nrf54RcpTputStatsNowUs() - phaseStartUs);
-    nrf54RcpTputStatsRecordSumMax(&g_nrf54_rcp_tput_stats.pass_alarm_sum_us,
-                                    &g_nrf54_rcp_tput_stats.pass_alarm_max_us,
-                                    phaseUs);
+    while (otTaskletsArePending(aInstance))
+    {
+        otTaskletsProcess(aInstance);
+    }
 
     phaseStartUs = nrf54RcpTputStatsNowUs();
     nrf54RcpTputStatsNoteTransportPass1();
@@ -158,6 +165,13 @@ void otSysProcessDrivers(otInstance *aInstance)
                                     phaseUs);
 
     nrf5TempProcess();
+
+    phaseStartUs = nrf54RcpTputStatsNowUs();
+    nrf5AlarmProcess(aInstance);
+    phaseUs = (uint32_t)(nrf54RcpTputStatsNowUs() - phaseStartUs);
+    nrf54RcpTputStatsRecordSumMax(&g_nrf54_rcp_tput_stats.pass_alarm_sum_us,
+                                    &g_nrf54_rcp_tput_stats.pass_alarm_max_us,
+                                    phaseUs);
 
     otPerfProcess(aInstance);
 

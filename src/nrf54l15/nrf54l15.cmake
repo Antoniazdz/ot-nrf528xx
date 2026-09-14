@@ -77,6 +77,7 @@ set(COMM_FLAGS
 )
 
 list(APPEND OT_PUBLIC_INCLUDES
+    "${NRF_PLATFORM_DIR}"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/cmsis"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/config/nrf54l15"
     "${PROJECT_SOURCE_DIR}/third_party/nrf54/nordic/nrfx/bsp/stable/mdk"
@@ -163,11 +164,16 @@ if(NOT DEFINED NRF54_CSL_KEEP_RADIO_AWAKE)
     set(NRF54_CSL_KEEP_RADIO_AWAKE 0)
 endif()
 
+if(NOT DEFINED OT_NRF54_ICACHE_ENABLE)
+    set(OT_NRF54_ICACHE_ENABLE 1)
+endif()
+
 target_compile_definitions(openthread-nrf54l15
     PUBLIC
         ${OT_PLATFORM_DEFINES}
         NRF54_CSL_KEEP_RADIO_AWAKE=${NRF54_CSL_KEEP_RADIO_AWAKE}
         NRF54_RCP_TPUT_STATS=1
+        OT_NRF54_ICACHE_ENABLE=${OT_NRF54_ICACHE_ENABLE}
 )
 
 target_compile_definitions(openthread-nrf54l15-transport

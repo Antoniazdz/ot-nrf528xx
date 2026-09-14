@@ -376,12 +376,16 @@ otError otPlatUartSend(const uint8_t *aBuf, uint16_t aBufLength)
 {
     otError error = OT_ERROR_NONE;
 
-    /* A caller handing over a new buffer has already accounted for the previous
-     * one, so close that transaction silently instead of reporting it again from
-     * here: the report would start a nested transfer and this buffer would then be
-     * rejected as busy and lost. */
-    reapTransmit();
-
+    /* Refuse a transfer that is still on the wire instead of waiting for it: reaping
+     * here stalled the whole driver pass for the duration of the previous frame
+     * (~5 ms for a 500-byte Spinel frame at 1 Mbaud) and dropped its completion.
+     *
+     * Completion stays with processTransmit() alone. Both callers advance their own
+     * TX state from otPlatUartSendDone() (cli_uart.cpp SendDoneTask(), ncp_hdlc.cpp
+     * HandleHdlcSendDone()), so reporting it from inside a send re-enters them under
+     * the buffer this send is about to hand to EasyDMA. Both also gate on that state
+     * before sending again, so OT_ERROR_BUSY is a backstop: the NCP retries it via
+     * mHdlcSendTask, and the CLI cannot reach it while sSendLength is non-zero. */
     otEXPECT_ACTION(sTransmitBuffer == NULL, error = OT_ERROR_BUSY);
 
     // Set up transmit buffer.
@@ -392,7 +396,14 @@ otError otPlatUartSend(const uint8_t *aBuf, uint16_t aBufLength)
     nrf_uarte_tx_buffer_set(UART_INSTANCE, sTransmitBuffer, aBufLength);
     nrf_uarte_task_trigger(UART_INSTANCE, NRF_UARTE_TASK_STARTTX);
 
+    nrf54RcpTputStatsNoteUartTxSend();
+
 exit:
+    if (error == OT_ERROR_BUSY)
+    {
+        nrf54RcpTputStatsNoteUartTxBusy();
+    }
+
     return error;
 }
 

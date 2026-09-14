@@ -82,11 +82,8 @@ static int8_t                     sTxPower          = 0;
 static uint32_t                   sTxPeriod         = 1;
 static int32_t                    sTxCount          = 0;
 static int32_t                    sTxRequestedCount = 1;
-static int16_t                    sID               = -1;
-static struct PlatformDiagMessage sDiagMessage      = {.mMessageDescriptor = "DiagMessage",
-                                                       .mChannel           = 0,
-                                                       .mID                = 0,
-                                                       .mCnt               = 0};
+static int16_t  sID      = -1;
+static uint32_t sDiagCnt = 0;
 
 static otPlatDiagOutputCallback sDiagOutputCallback  = NULL;
 static void                    *sDiagCallbackContext = NULL;
@@ -211,7 +208,9 @@ static otError processTransmit(otInstance *aInstance, uint8_t aArgsLength, char 
         otPlatAlarmMilliStop(aInstance);
         sTransmitMode = kDiagTransmitModePackets;
         sTxCount      = sTxRequestedCount;
-        uint32_t now  = otPlatAlarmMilliGetNow();
+        sDiagCnt      = 0;
+        memcpy(otPlatRadioGetTransmitBuffer(aInstance)->mPsdu, "DiagMessage", 11);
+        uint32_t now = otPlatAlarmMilliGetNow();
         otPlatAlarmMilliStartAt(aInstance, now, sTxPeriod);
         diagOutput("sending %" PRId32 " diagnostic messages with %" PRIu32 " ms interval\r\nstatus 0x%02x\r\n",
                    sTxRequestedCount, sTxPeriod, error);
@@ -416,18 +415,16 @@ void otPlatDiagAlarmCallback(otInstance *aInstance)
     {
         if ((sTxCount > 0) || (sTxCount == -1))
         {
-            otRadioFrame *sTxPacket = otPlatRadioGetTransmitBuffer(aInstance);
+            otRadioFrame               *sTxPacket = otPlatRadioGetTransmitBuffer(aInstance);
+            struct PlatformDiagMessage *message   = (struct PlatformDiagMessage *)sTxPacket->mPsdu;
 
             sTxPacket->mLength  = sizeof(struct PlatformDiagMessage);
             sTxPacket->mChannel = sChannel;
 
-            sDiagMessage.mChannel = sTxPacket->mChannel;
-            sDiagMessage.mID      = sID;
-
-            memcpy(sTxPacket->mPsdu, &sDiagMessage, sizeof(struct PlatformDiagMessage));
+            message->mChannel = sChannel;
+            message->mID      = sID;
+            message->mCnt     = sDiagCnt++;
             otPlatRadioTransmit(aInstance, sTxPacket);
-
-            sDiagMessage.mCnt++;
 
             if (sTxCount != -1)
             {
