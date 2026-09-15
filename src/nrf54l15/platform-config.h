@@ -94,19 +94,6 @@
  * @section Core / memory configuration.
  ******************************************************************************/
 
-/**
- * @def OT_NRF54_ICACHE_ENABLE
- *
- * Enable the C-AHB instruction/data cache (CACHE peripheral) in otSysInit().
- *
- * The nRF54L15 core fetches code from RRAM over the C-AHB bus and CACHE.ENABLE
- * reads 0 out of reset, so leaving this off makes every instruction fetch pay
- * RRAM latency. Set to 0 only to A/B the uncached path.
- */
-#ifndef OT_NRF54_ICACHE_ENABLE
-#define OT_NRF54_ICACHE_ENABLE 1
-#endif
-
 /*******************************************************************************
  * @section OpenThread alarm (GRTC) configuration.
  ******************************************************************************/

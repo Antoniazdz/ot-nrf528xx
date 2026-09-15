@@ -163,15 +163,10 @@ if(NOT DEFINED NRF54_CSL_KEEP_RADIO_AWAKE)
     set(NRF54_CSL_KEEP_RADIO_AWAKE 0)
 endif()
 
-if(NOT DEFINED OT_NRF54_ICACHE_ENABLE)
-    set(OT_NRF54_ICACHE_ENABLE 1)
-endif()
-
 target_compile_definitions(openthread-nrf54l15
     PUBLIC
         ${OT_PLATFORM_DEFINES}
         NRF54_CSL_KEEP_RADIO_AWAKE=${NRF54_CSL_KEEP_RADIO_AWAKE}
-        OT_NRF54_ICACHE_ENABLE=${OT_NRF54_ICACHE_ENABLE}
 )
 
 target_compile_definitions(openthread-nrf54l15-transport

@@ -52,9 +52,6 @@
 #include <openthread/tasklet.h>
 /* CSL-F4.1-END */
 
-/* Weak no-op: overridden by src/ot_perf/ot_perf.c when linked into ot-cli-ftd. */
-OT_TOOL_WEAK void otPerfProcess(otInstance *aInstance) { OT_UNUSED_VARIABLE(aInstance); }
-
 #if !OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS_MANAGEMENT && PLATFORM_OPENTHREAD_VANILLA
 
 #include <mbedtls/platform.h>
@@ -81,7 +78,7 @@ void otSysInit(int argc, char *argv[])
         otSysDeinit();
     }
 
-#if OT_NRF54_ICACHE_ENABLE && defined(NRF_ICACHE)
+#ifdef NRF_ICACHE
     /* Counterpart of NVMC->ICACHECNF on nRF52 and of sys_cache_instr_enable() in the
      * Zephyr nRF54L SoC init. Writes to cached RRAM are write-around and invalidate
      * the line in hardware, so flash_nosd.c needs no cache maintenance. */
@@ -134,19 +131,13 @@ bool otSysPseudoResetWasRequested(void)
 
 void otSysProcessDrivers(otInstance *aInstance)
 {
-    /* nRF52 order: radio, then transport/temp/alarm. Drain notify HDLC tasklets
-     * immediately after radio so uart_prep does not include alarm or host RX decode. */
+    /* CSL-F4.1-BEGIN: alarm before radio (was last in driver pass) */
+    nrf5AlarmProcess(aInstance);
+    /* CSL-F4.1-END */
+
     nrf5RadioProcess(aInstance);
-
-    while (otTaskletsArePending(aInstance))
-    {
-        otTaskletsProcess(aInstance);
-    }
-
     nrf5TransportProcess();
     nrf5TempProcess();
-    nrf5AlarmProcess(aInstance);
-    otPerfProcess(aInstance);
 }
 
 /* CSL-F4.1-BEGIN: __SEV() wake (was __WEAK empty stub) */
