@@ -47,6 +47,7 @@
 #include "platform-nrf5.h"
 
 #include <nrfx.h>
+#include <hal/nrf_cache.h>
 /* CSL-F4.1-BEGIN: tasklets + early alarm in main loop */
 #include <openthread/tasklet.h>
 /* CSL-F4.1-END */
@@ -79,6 +80,13 @@ void otSysInit(int argc, char *argv[])
     {
         otSysDeinit();
     }
+
+#if OT_NRF54_ICACHE_ENABLE && defined(NRF_ICACHE)
+    /* Counterpart of NVMC->ICACHECNF on nRF52 and of sys_cache_instr_enable() in the
+     * Zephyr nRF54L SoC init. Writes to cached RRAM are write-around and invalidate
+     * the line in hardware, so flash_nosd.c needs no cache maintenance. */
+    nrf_cache_enable(NRF_ICACHE);
+#endif
 
 #if !OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS_MANAGEMENT && PLATFORM_OPENTHREAD_VANILLA
     mbedtls_platform_set_calloc_free(otHeapCAlloc, otHeapFree);
@@ -126,20 +134,18 @@ bool otSysPseudoResetWasRequested(void)
 
 void otSysProcessDrivers(otInstance *aInstance)
 {
-    /* CSL-F4.1-BEGIN: alarm before radio (was last in driver pass) */
-    nrf5AlarmProcess(aInstance);
-    /* CSL-F4.1-END */
-
-    /*
-     * Drain Spinel before delivering deferred radio callbacks so UART HWFC
-     * releases the host promptly. Run it again afterwards to complete UART
-     * events that may have arrived while OpenThread handled the radio work.
-     */
-    nrf5TransportProcess();
+    /* nRF52 order: radio, then transport/temp/alarm. Drain notify HDLC tasklets
+     * immediately after radio so uart_prep does not include alarm or host RX decode. */
     nrf5RadioProcess(aInstance);
+
+    while (otTaskletsArePending(aInstance))
+    {
+        otTaskletsProcess(aInstance);
+    }
+
     nrf5TransportProcess();
     nrf5TempProcess();
-
+    nrf5AlarmProcess(aInstance);
     otPerfProcess(aInstance);
 }
 

@@ -91,6 +91,23 @@
 #endif
 
 /*******************************************************************************
+ * @section Core / memory configuration.
+ ******************************************************************************/
+
+/**
+ * @def OT_NRF54_ICACHE_ENABLE
+ *
+ * Enable the C-AHB instruction/data cache (CACHE peripheral) in otSysInit().
+ *
+ * The nRF54L15 core fetches code from RRAM over the C-AHB bus and CACHE.ENABLE
+ * reads 0 out of reset, so leaving this off makes every instruction fetch pay
+ * RRAM latency. Set to 0 only to A/B the uncached path.
+ */
+#ifndef OT_NRF54_ICACHE_ENABLE
+#define OT_NRF54_ICACHE_ENABLE 1
+#endif
+
+/*******************************************************************************
  * @section OpenThread alarm (GRTC) configuration.
  ******************************************************************************/
 
@@ -100,7 +117,7 @@
  * Interrupt priority for GRTC (OT ms/us alarms).
  */
 #ifndef OT_GRTC_IRQ_PRIORITY
-#define OT_GRTC_IRQ_PRIORITY 6
+#define OT_GRTC_IRQ_PRIORITY 1
 #endif
 
 /**
@@ -166,6 +183,9 @@
 #define OT_GRTC_ALWAYS_ON 1
 #endif
 
+#ifndef NRF_802154_SWI_PRIORITY
+#define NRF_802154_SWI_PRIORITY 1
+#endif
 /**
  * @def OT_HFCLK_ALWAYS_ON
  *

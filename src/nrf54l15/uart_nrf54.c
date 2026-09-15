@@ -125,6 +125,7 @@ static void uarteRxArm(void)
  */
 static void processReceive(void)
 {
+    uint16_t deliveredBytes;
     // Set head position to not be changed during read procedure.
     uint16_t head = sReceiveHead;
     uint8_t *position;
@@ -133,16 +134,18 @@ static void processReceive(void)
     // bytes from the end of the buffer.
     if (head < sReceiveTail)
     {
-        position = &sReceiveBuffer[sReceiveTail];
-        otPlatUartReceived(position, (UART_RX_BUFFER_SIZE - sReceiveTail));
+        deliveredBytes = (uint16_t)(UART_RX_BUFFER_SIZE - sReceiveTail);
+        position         = &sReceiveBuffer[sReceiveTail];
+        otPlatUartReceived(position, deliveredBytes);
         sReceiveTail = 0;
     }
 
     // Notify about received bytes.
     if (head > sReceiveTail)
     {
-        position = &sReceiveBuffer[sReceiveTail];
-        otPlatUartReceived(position, (head - sReceiveTail));
+        deliveredBytes = (uint16_t)(head - sReceiveTail);
+        position         = &sReceiveBuffer[sReceiveTail];
+        otPlatUartReceived(position, deliveredBytes);
         sReceiveTail = head;
     }
 
@@ -367,12 +370,16 @@ otError otPlatUartSend(const uint8_t *aBuf, uint16_t aBufLength)
 {
     otError error = OT_ERROR_NONE;
 
-    /* A caller handing over a new buffer has already accounted for the previous
-     * one, so close that transaction silently instead of reporting it again from
-     * here: the report would start a nested transfer and this buffer would then be
-     * rejected as busy and lost. */
-    reapTransmit();
-
+    /* Refuse a transfer that is still on the wire instead of waiting for it: reaping
+     * here stalled the whole driver pass for the duration of the previous frame
+     * (~5 ms for a 500-byte Spinel frame at 1 Mbaud) and dropped its completion.
+     *
+     * Completion stays with processTransmit() alone. Both callers advance their own
+     * TX state from otPlatUartSendDone() (cli_uart.cpp SendDoneTask(), ncp_hdlc.cpp
+     * HandleHdlcSendDone()), so reporting it from inside a send re-enters them under
+     * the buffer this send is about to hand to EasyDMA. Both also gate on that state
+     * before sending again, so OT_ERROR_BUSY is a backstop: the NCP retries it via
+     * mHdlcSendTask, and the CLI cannot reach it while sSendLength is non-zero. */
     otEXPECT_ACTION(sTransmitBuffer == NULL, error = OT_ERROR_BUSY);
 
     // Set up transmit buffer.

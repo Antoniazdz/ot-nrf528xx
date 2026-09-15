@@ -119,12 +119,9 @@ static uint8_t  sEnergyDetectionChannel;
 static int8_t   sEnergyDetected;
 
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-static uint32_t      sCslPeriod;
-static uint32_t      sCslSampleTime;
-static bool          sCslHfclkHeld; /* CSL-F1: HFCLK ref-count while CSL active */
-static const uint8_t sCslIeHeader[OT_IE_HEADER_SIZE] = {CSL_IE_HEADER_BYTES_LO, CSL_IE_HEADER_BYTES_HI};
-
-
+static uint32_t sCslPeriod;
+static uint32_t sCslSampleTime;
+static bool     sCslHfclkHeld; /* CSL-F1: HFCLK ref-count while CSL active */
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 
 typedef enum
@@ -237,19 +234,43 @@ static void dataInit(void)
     SetRadioDriverState(NRF_802154_STATE_SLEEP);
 }
 
-static void convertShortAddress(uint8_t *aTo, uint16_t aFrom)
+// 802.15.4 short addresses are little-endian; native uint16_t layout matches on LE CPUs.
+static inline const uint8_t *nrf54ShortAddressBytes(const uint16_t *aShortAddress)
 {
-    aTo[0] = (uint8_t)aFrom;
-    aTo[1] = (uint8_t)(aFrom >> 8);
+    return (const uint8_t *)aShortAddress;
 }
 
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
-static void convertExtAddress(uint8_t *aTo, const otExtAddress *aFrom)
+static inline void nrf54ExtAddressToDriverLe(uint8_t *aTo, const otExtAddress *aFrom)
 {
     for (uint8_t i = 0; i < sizeof(otExtAddress); i++)
     {
-        aTo[i] = aFrom->m8[sizeof(otExtAddress) - i - 1];
+        aTo[i] = aFrom->m8[sizeof(otExtAddress) - 1U - i];
     }
+}
+
+static bool nrf54AckDataSet(uint16_t            aShortAddr,
+                            const otExtAddress *aExtAddr,
+                            const uint8_t      *aData,
+                            uint16_t            aLength)
+{
+    uint8_t extAddr[OT_EXT_ADDRESS_SIZE];
+
+    nrf54ExtAddressToDriverLe(extAddr, aExtAddr);
+
+    return nrf_802154_ack_data_set(nrf54ShortAddressBytes(&aShortAddr), false, aData, aLength,
+                                   NRF_802154_ACK_DATA_IE) &&
+           nrf_802154_ack_data_set(extAddr, true, aData, aLength, NRF_802154_ACK_DATA_IE);
+}
+
+static void nrf54AckDataClear(uint16_t aShortAddr, const otExtAddress *aExtAddr)
+{
+    uint8_t extAddr[OT_EXT_ADDRESS_SIZE];
+
+    nrf54ExtAddressToDriverLe(extAddr, aExtAddr);
+
+    nrf_802154_ack_data_clear(nrf54ShortAddressBytes(&aShortAddr), false, NRF_802154_ACK_DATA_IE);
+    nrf_802154_ack_data_clear(extAddr, true, NRF_802154_ACK_DATA_IE);
 }
 #endif
 
@@ -392,7 +413,11 @@ void otPlatRadioGetIeeeEui64(otInstance *aInstance, uint8_t *aIeeeEui64)
     // Use device identifier assigned during the production.
     factoryAddress = (uint64_t)nrf_ficr_deviceid_get(NRF_FICR, 0) << 32;
     factoryAddress |= nrf_ficr_deviceid_get(NRF_FICR, 1);
-    memcpy(aIeeeEui64 + index, &factoryAddress, sizeof(factoryAddress) - index);
+    aIeeeEui64[index++] = (uint8_t)(factoryAddress);
+    aIeeeEui64[index++] = (uint8_t)(factoryAddress >> 8);
+    aIeeeEui64[index++] = (uint8_t)(factoryAddress >> 16);
+    aIeeeEui64[index++] = (uint8_t)(factoryAddress >> 24);
+    aIeeeEui64[index++] = (uint8_t)(factoryAddress >> 32);
 }
 #endif // OPENTHREAD_CONFIG_ENABLE_PLATFORM_EUI64_CUSTOM_SOURCE
 
@@ -400,10 +425,7 @@ void otPlatRadioSetPanId(otInstance *aInstance, uint16_t aPanId)
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    uint8_t address[SHORT_ADDRESS_SIZE];
-    convertShortAddress(address, aPanId);
-
-    nrf_802154_pan_id_set(address);
+    nrf_802154_pan_id_set(nrf54ShortAddressBytes(&aPanId));
 }
 
 void otPlatRadioSetExtendedAddress(otInstance *aInstance, const otExtAddress *aExtAddress)
@@ -417,10 +439,7 @@ void otPlatRadioSetShortAddress(otInstance *aInstance, uint16_t aShortAddress)
 {
     OT_UNUSED_VARIABLE(aInstance);
 
-    uint8_t address[SHORT_ADDRESS_SIZE];
-    convertShortAddress(address, aShortAddress);
-
-    nrf_802154_short_address_set(address);
+    nrf_802154_short_address_set(nrf54ShortAddressBytes(&aShortAddress));
 }
 
 void nrf5RadioInit(void)
@@ -798,10 +817,7 @@ otError otPlatRadioAddSrcMatchShortEntry(otInstance *aInstance, uint16_t aShortA
 
     otError error;
 
-    uint8_t shortAddress[SHORT_ADDRESS_SIZE];
-    convertShortAddress(shortAddress, aShortAddress);
-
-    if (nrf_802154_pending_bit_for_addr_set(shortAddress, false))
+    if (nrf_802154_pending_bit_for_addr_set(nrf54ShortAddressBytes(&aShortAddress), false))
     {
         error = OT_ERROR_NONE;
     }
@@ -837,10 +853,7 @@ otError otPlatRadioClearSrcMatchShortEntry(otInstance *aInstance, uint16_t aShor
 
     otError error;
 
-    uint8_t shortAddress[SHORT_ADDRESS_SIZE];
-    convertShortAddress(shortAddress, aShortAddress);
-
-    if (nrf_802154_pending_bit_for_addr_clear(shortAddress, false))
+    if (nrf_802154_pending_bit_for_addr_clear(nrf54ShortAddressBytes(&aShortAddress), false))
     {
         error = OT_ERROR_NONE;
     }
@@ -1498,8 +1511,6 @@ static void updateIeData(otInstance *aInstance, otShortAddress aShortAddr, const
 
     int8_t  offset = 0;
     uint8_t ackIeData[OT_ACK_IE_MAX_SIZE];
-    uint8_t extAddr[OT_EXT_ADDRESS_SIZE];
-    uint8_t shortAddr[SHORT_ADDRESS_SIZE];
 #if OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
     uint8_t      enhAckProbingDataLen = 0;
     otMacAddress macAddress;
@@ -1510,7 +1521,8 @@ static void updateIeData(otInstance *aInstance, otShortAddress aShortAddr, const
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
     if (sCslPeriod > 0)
     {
-        memcpy(ackIeData, sCslIeHeader, OT_IE_HEADER_SIZE);
+        ackIeData[0] = CSL_IE_HEADER_BYTES_LO;
+        ackIeData[1] = CSL_IE_HEADER_BYTES_HI;
         offset += OT_IE_HEADER_SIZE + OT_CSL_IE_SIZE; // reserve space for CSL IE
     }
 #endif
@@ -1522,18 +1534,13 @@ static void updateIeData(otInstance *aInstance, otShortAddress aShortAddr, const
     }
 #endif
 
-    convertShortAddress(shortAddr, aShortAddr);
-    convertExtAddress(extAddr, aExtAddr);
-
     if (offset > 0)
     {
-        nrf_802154_ack_data_set(shortAddr, false, ackIeData, offset, NRF_802154_ACK_DATA_IE);
-        nrf_802154_ack_data_set(extAddr, true, ackIeData, offset, NRF_802154_ACK_DATA_IE);
+        nrf54AckDataSet(aShortAddr, aExtAddr, ackIeData, (uint16_t)offset);
     }
     else
     {
-        nrf_802154_ack_data_clear(shortAddr, false, NRF_802154_ACK_DATA_IE);
-        nrf_802154_ack_data_clear(extAddr, true, NRF_802154_ACK_DATA_IE);
+        nrf54AckDataClear(aShortAddr, aExtAddr);
     }
 }
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MLE_LINK_METRICS_SUBJECT_ENABLE
