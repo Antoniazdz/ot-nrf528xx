@@ -315,41 +315,6 @@ static inline bool nrf54CslSuppressPlatformSleep(void)
 #endif
 }
 
-
-/**
- * Enter driver sleep for sleepy CSL child (NCS contract). Uses sleep_if_idle first;
- * if still in mesh RX, terminate with nrf_802154_sleep() so DRX core_receive is not skipped.
- *
- * @returns true if radio is in sleep (or was already).
- */
-static bool nrf54CslTryEnterSleep(void)
-{
-    nrf_802154_sleep_error_t err;
-
-    err = nrf_802154_sleep_if_idle();
-
-    if (err == NRF_802154_SLEEP_ERROR_NONE)
-    {
-        nrf5FemDisable();
-        SetRadioDriverState(NRF_802154_STATE_SLEEP);
-        return true;
-    }
-
-    if (sCslPeriod > 0 && !sRxOnWhenIdle)
-    {
-        err = nrf_802154_sleep();
-
-        if (err == NRF_802154_SLEEP_ERROR_NONE)
-        {
-            nrf5FemDisable();
-            SetRadioDriverState(NRF_802154_STATE_SLEEP);
-            return true;
-        }
-    }
-
-    return false;
-}
-
 /* CSL-P0-F3b: after poll on mesh channel, leave HW RX so DRX callback is not skipped. */
 static void cslScheduleSleepIfChildRxOff(void)
 {
@@ -365,11 +330,16 @@ static void cslScheduleSleepIfChildRxOff(void)
 }
 #endif
 
-static bool nrfRadioTryEnterSleep(void)
+/**
+ * Enter driver sleep when the 802.15.4 driver is idle (NCS / nRF52840 contract).
+ *
+ * SubMac may call otPlatRadioSleep() between CSL windows; only sleep_if_idle() is used
+ * so a scheduled DRX receive_at is not torn down by nrf_802154_sleep().
+ *
+ * @returns true if radio is in sleep (or was already idle).
+ */
+static bool nrf54RadioSleepIfIdle(void)
 {
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-    return nrf54CslTryEnterSleep();
-#else
     if (nrf_802154_sleep_if_idle() == NRF_802154_SLEEP_ERROR_NONE)
     {
         nrf5FemDisable();
@@ -378,7 +348,11 @@ static bool nrfRadioTryEnterSleep(void)
     }
 
     return false;
-#endif
+}
+
+static bool nrfRadioTryEnterSleep(void)
+{
+    return nrf54RadioSleepIfIdle();
 }
 
 static inline void clearPendingEvents(void)
@@ -606,15 +580,6 @@ otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t a
     result = nrf_802154_receive_at(rxTime, aDuration, aChannel, DRX_SLOT_RX);
     clearPendingEvents();
 
-    if (result)
-    {
-        /* After DRX is scheduled, drop mesh RX (not sleep before receive_at — that kills lptimer). */
-        if (!sRxOnWhenIdle && sDriverState == NRF_802154_STATE_RECEIVE)
-        {
-            setPendingEvent(kPendingEventSleep);
-        }
-    }
-
     return result ? OT_ERROR_NONE : OT_ERROR_FAILED;
 }
 #endif
@@ -779,14 +744,7 @@ void otPlatRadioSetRxOnWhenIdle(otInstance *aInstance, bool aEnable)
 
     if (!sRxOnWhenIdle)
     {
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-        if (!nrf54CslSuppressPlatformSleep())
-        {
-            (void)nrf54CslTryEnterSleep();
-        }
-#else
         (void)nrf_802154_sleep_if_idle();
-#endif
     }
 }
 
